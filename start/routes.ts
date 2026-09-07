@@ -76,6 +76,18 @@ router
     router
       .post('rankings/:ranking/recompute', [controllers.Rankings, 'recompute'])
       .as('rankings.recompute')
+    router
+      .post('rankings/:ranking/eligibility-overrides', [
+        controllers.Rankings,
+        'addEligibilityOverride',
+      ])
+      .as('rankings.eligibilityOverrides.store')
+    router
+      .delete('rankings/:ranking/eligibility-overrides/:override', [
+        controllers.Rankings,
+        'removeEligibilityOverride',
+      ])
+      .as('rankings.eligibilityOverrides.destroy')
 
     /**
      * Reassigning an imported account to a different player. Posted from the
@@ -92,6 +104,17 @@ router
 
     /** Correcting a player's tag and location. Posted from the player page. */
     router.patch('players/:player', [controllers.Players, 'update']).as('players.update')
+
+    /** Manual "this player attended this event" grants. */
+    router
+      .post('players/:player/attendance', [controllers.Players, 'addAttendance'])
+      .as('players.attendance.store')
+    router
+      .delete('players/:player/attendance/:eventAttendance', [
+        controllers.Players,
+        'removeAttendance',
+      ])
+      .as('players.attendance.destroy')
 
     router.delete('events/:event', [controllers.Events, 'destroy']).as('events.destroy')
 

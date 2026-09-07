@@ -1,8 +1,13 @@
 import db from '@adonisjs/lucid/services/db'
 import LeaguePlayer from '#models/league_player'
 import Ranking from '#models/ranking'
+import RankingEligibilityOverride from '#models/ranking_eligibility_override'
+import PlayerEventAttendance from '#models/player_event_attendance'
 import LeaguePolicy from '#policies/league_policy'
+import RecomputeRankingJob from '#jobs/recompute_ranking_job'
+import { StalenessService } from '#services/rankings/staleness_service'
 import { updatePlayerValidator } from '#validators/player'
+import { addPlayerEventAttendanceValidator } from '#validators/player_event_attendance'
 import { DEFAULT_TIMEZONE } from '#lib/geo/timezones'
 import { normalizeCountry, normalizeState } from '#lib/geo/country'
 import { platforms } from '#lib/platforms/registry'
@@ -200,9 +205,33 @@ export default class PlayersController {
 
     const zone = league.timezone ?? DEFAULT_TIMEZONE
 
+    const eligibilityOverride = ranking
+      ? await RankingEligibilityOverride.query()
+          .where('rankingId', ranking.id)
+          .where('leaguePlayerId', player.id)
+          .first()
+      : null
+
+    const canManage = await bouncer.with(LeaguePolicy).allows('manage', league)
+
+    const attendanceCredits = await PlayerEventAttendance.query()
+      .where('leaguePlayerId', player.id)
+      .preload('event', (query) => query.preload('tournament'))
+      .orderBy('createdAt', 'desc')
+
+    const leagueEvents = canManage
+      ? await db
+          .from('league_events as le')
+          .innerJoin('events as e', 'e.id', 'le.event_id')
+          .innerJoin('tournaments as t', 't.id', 'e.tournament_id')
+          .where('le.league_id', league.id)
+          .select('e.id', 'e.name as event_name', 't.name as tournament_name', 't.start_at')
+          .orderBy('t.start_at', 'desc')
+      : []
+
     return inertia.render('leagues/player', {
       league: { slug: league.slug, name: league.name },
-      canManage: await bouncer.with(LeaguePolicy).allows('manage', league),
+      canManage,
       player: {
         id: player.id,
         slug: player.slug,
@@ -213,6 +242,18 @@ export default class PlayersController {
         country: player.country,
       },
       ranking: ranking ? { slug: ranking.slug, name: ranking.name } : null,
+      eligibilityOverride: eligibilityOverride
+        ? { id: eligibilityOverride.id, kind: eligibilityOverride.kind }
+        : null,
+      attendanceCredits: attendanceCredits.map((credit) => ({
+        id: credit.id,
+        label: `${credit.event.tournament.name} — ${credit.event.name}`,
+        startAt: credit.event.tournament.startAt?.setZone(zone).toISODate() ?? null,
+      })),
+      events: leagueEvents.map((row) => ({
+        id: row.id,
+        label: `${row.tournament_name} — ${row.event_name}`,
+      })),
       standing: standing
         ? {
             rank: standing.rank,
@@ -309,6 +350,84 @@ export default class PlayersController {
     session.flash('success', `Updated ${player.displayTag}`)
 
     return response.redirect().toRoute('players.show', { league: league.slug, player: player.slug })
+  }
+
+  /**
+   * A manual "this player attended this event" grant, league-wide.
+   */
+  async addAttendance({ league, params, request, response, session }: HttpContext) {
+    const player = await LeaguePlayer.query()
+      .where('leagueId', league.id)
+      .where('slug', params.player)
+      .whereNull('mergedIntoId')
+      .first()
+
+    if (!player) {
+      return response.notFound({ message: 'No such player' })
+    }
+
+    const payload = await request.validateUsing(addPlayerEventAttendanceValidator)
+
+    const counted = await db
+      .from('league_events')
+      .where('league_id', league.id)
+      .where('event_id', payload.eventId)
+      .first()
+
+    if (!counted) {
+      return response.notFound({ message: 'No such event in this league' })
+    }
+
+    const existing = await PlayerEventAttendance.query()
+      .where('leaguePlayerId', player.id)
+      .where('eventId', payload.eventId)
+      .first()
+
+    if (existing) {
+      session.flash('error', `${player.displayTag} already has attendance credit for that event.`)
+      return response.redirect().back()
+    }
+
+    await PlayerEventAttendance.create({ leaguePlayerId: player.id, eventId: payload.eventId })
+    await this.restaleAndForceRecompute(league.id)
+
+    session.flash('success', `Credited ${player.displayTag} with attendance.`)
+
+    return response.redirect().back()
+  }
+
+  async removeAttendance({ league, params, response, session }: HttpContext) {
+    const player = await LeaguePlayer.query()
+      .where('leagueId', league.id)
+      .where('slug', params.player)
+      .first()
+
+    if (!player) {
+      return response.notFound({ message: 'No such player' })
+    }
+
+    const attendance = await PlayerEventAttendance.query()
+      .where('id', params.eventAttendance)
+      .where('leaguePlayerId', player.id)
+      .first()
+
+    if (!attendance) {
+      return response.notFound({ message: 'No such attendance credit' })
+    }
+
+    await attendance.delete()
+    await this.restaleAndForceRecompute(league.id)
+
+    session.flash('success', 'Attendance credit removed.')
+
+    return response.redirect().back()
+  }
+
+  private async restaleAndForceRecompute(leagueId: string): Promise<void> {
+    const auto = await new StalenessService().markLeagueStale(leagueId)
+    for (const rankingId of auto) {
+      await RecomputeRankingJob.dispatch({ rankingId, force: true })
+    }
   }
 }
 

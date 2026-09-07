@@ -319,6 +319,30 @@ export interface Registry {
       errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/rankings_controller').default['recompute']>>>
     }
   }
+  'rankings.eligibilityOverrides.store': {
+    methods: ["POST"]
+    pattern: '/:league/rankings/:ranking/eligibility-overrides'
+    types: {
+      body: ExtractBody<InferInput<(typeof import('#validators/ranking_eligibility_override').addEligibilityOverrideValidator)>>
+      paramsTuple: [ParamValue, ParamValue]
+      params: { league: ParamValue; ranking: ParamValue }
+      query: ExtractQuery<InferInput<(typeof import('#validators/ranking_eligibility_override').addEligibilityOverrideValidator)>>
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/rankings_controller').default['addEligibilityOverride']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/rankings_controller').default['addEligibilityOverride']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'rankings.eligibilityOverrides.destroy': {
+    methods: ["DELETE"]
+    pattern: '/:league/rankings/:ranking/eligibility-overrides/:override'
+    types: {
+      body: {}
+      paramsTuple: [ParamValue, ParamValue, ParamValue]
+      params: { league: ParamValue; ranking: ParamValue; override: ParamValue }
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/rankings_controller').default['removeEligibilityOverride']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/rankings_controller').default['removeEligibilityOverride']>>>
+    }
+  }
   'identity.update': {
     methods: ["POST"]
     pattern: '/:league/identity'
@@ -365,6 +389,30 @@ export interface Registry {
       query: ExtractQuery<InferInput<(typeof import('#validators/player').updatePlayerValidator)>>
       response: ExtractResponse<Awaited<ReturnType<import('#controllers/players_controller').default['update']>>>
       errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/players_controller').default['update']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'players.attendance.store': {
+    methods: ["POST"]
+    pattern: '/:league/players/:player/attendance'
+    types: {
+      body: ExtractBody<InferInput<(typeof import('#validators/player_event_attendance').addPlayerEventAttendanceValidator)>>
+      paramsTuple: [ParamValue, ParamValue]
+      params: { league: ParamValue; player: ParamValue }
+      query: ExtractQuery<InferInput<(typeof import('#validators/player_event_attendance').addPlayerEventAttendanceValidator)>>
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/players_controller').default['addAttendance']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/players_controller').default['addAttendance']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'players.attendance.destroy': {
+    methods: ["DELETE"]
+    pattern: '/:league/players/:player/attendance/:eventAttendance'
+    types: {
+      body: {}
+      paramsTuple: [ParamValue, ParamValue, ParamValue]
+      params: { league: ParamValue; player: ParamValue; eventAttendance: ParamValue }
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/players_controller').default['removeAttendance']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/players_controller').default['removeAttendance']>>>
     }
   }
   'events.destroy': {

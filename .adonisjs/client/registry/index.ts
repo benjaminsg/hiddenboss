@@ -162,6 +162,18 @@ const routes = {
     tokens: [{"old":"/:league/rankings/:ranking/recompute","type":1,"val":"league","end":""},{"old":"/:league/rankings/:ranking/recompute","type":0,"val":"rankings","end":""},{"old":"/:league/rankings/:ranking/recompute","type":1,"val":"ranking","end":""},{"old":"/:league/rankings/:ranking/recompute","type":0,"val":"recompute","end":""}],
     types: placeholder as Registry['rankings.recompute']['types'],
   },
+  'rankings.eligibilityOverrides.store': {
+    methods: ["POST"],
+    pattern: '/:league/rankings/:ranking/eligibility-overrides',
+    tokens: [{"old":"/:league/rankings/:ranking/eligibility-overrides","type":1,"val":"league","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides","type":0,"val":"rankings","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides","type":1,"val":"ranking","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides","type":0,"val":"eligibility-overrides","end":""}],
+    types: placeholder as Registry['rankings.eligibilityOverrides.store']['types'],
+  },
+  'rankings.eligibilityOverrides.destroy': {
+    methods: ["DELETE"],
+    pattern: '/:league/rankings/:ranking/eligibility-overrides/:override',
+    tokens: [{"old":"/:league/rankings/:ranking/eligibility-overrides/:override","type":1,"val":"league","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides/:override","type":0,"val":"rankings","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides/:override","type":1,"val":"ranking","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides/:override","type":0,"val":"eligibility-overrides","end":""},{"old":"/:league/rankings/:ranking/eligibility-overrides/:override","type":1,"val":"override","end":""}],
+    types: placeholder as Registry['rankings.eligibilityOverrides.destroy']['types'],
+  },
   'identity.update': {
     methods: ["POST"],
     pattern: '/:league/identity',
@@ -185,6 +197,18 @@ const routes = {
     pattern: '/:league/players/:player',
     tokens: [{"old":"/:league/players/:player","type":1,"val":"league","end":""},{"old":"/:league/players/:player","type":0,"val":"players","end":""},{"old":"/:league/players/:player","type":1,"val":"player","end":""}],
     types: placeholder as Registry['players.update']['types'],
+  },
+  'players.attendance.store': {
+    methods: ["POST"],
+    pattern: '/:league/players/:player/attendance',
+    tokens: [{"old":"/:league/players/:player/attendance","type":1,"val":"league","end":""},{"old":"/:league/players/:player/attendance","type":0,"val":"players","end":""},{"old":"/:league/players/:player/attendance","type":1,"val":"player","end":""},{"old":"/:league/players/:player/attendance","type":0,"val":"attendance","end":""}],
+    types: placeholder as Registry['players.attendance.store']['types'],
+  },
+  'players.attendance.destroy': {
+    methods: ["DELETE"],
+    pattern: '/:league/players/:player/attendance/:eventAttendance',
+    tokens: [{"old":"/:league/players/:player/attendance/:eventAttendance","type":1,"val":"league","end":""},{"old":"/:league/players/:player/attendance/:eventAttendance","type":0,"val":"players","end":""},{"old":"/:league/players/:player/attendance/:eventAttendance","type":1,"val":"player","end":""},{"old":"/:league/players/:player/attendance/:eventAttendance","type":0,"val":"attendance","end":""},{"old":"/:league/players/:player/attendance/:eventAttendance","type":1,"val":"eventAttendance","end":""}],
+    types: placeholder as Registry['players.attendance.destroy']['types'],
   },
   'events.destroy': {
     methods: ["DELETE"],

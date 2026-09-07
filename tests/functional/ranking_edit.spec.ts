@@ -220,6 +220,49 @@ test.group('ranking edit', (group) => {
     assert.deepEqual(reloaded.activityRequirements, [])
   })
 
+  test('updating only the residency requirement does not request a recompute', async ({
+    client,
+    assert,
+  }) => {
+    const { owner, league } = await makeLeagueWithOwner()
+    const ranking = await makeRanking(league)
+
+    const response = await client
+      .patch(`/${league.slug}/rankings/${ranking.slug}`)
+      .loginAs(owner)
+      .withCsrfToken()
+      .fields({ 'residencyRequirements[0][state]': 'WA' })
+      .redirects(0)
+
+    response.assertStatus(302)
+
+    const reloaded = await Ranking.findOrFail(ranking.id)
+    assert.deepEqual(reloaded.residencyRequirements, [{ state: 'WA' }])
+    assert.isNull(
+      reloaded.latestRecomputeId,
+      "a league player's own location is always current, so residency needs no replay"
+    )
+  })
+
+  test('submitting an all-blank residency row drops it', async ({ client, assert }) => {
+    const { owner, league } = await makeLeagueWithOwner()
+    const ranking = await makeRanking(league, {
+      residencyRequirements: [{ state: 'WA' }],
+    })
+
+    const response = await client
+      .patch(`/${league.slug}/rankings/${ranking.slug}`)
+      .loginAs(owner)
+      .withCsrfToken()
+      .fields({ 'residencyRequirements[0][city]': '' })
+      .redirects(0)
+
+    response.assertStatus(302)
+
+    const reloaded = await Ranking.findOrFail(ranking.id)
+    assert.deepEqual(reloaded.residencyRequirements, [])
+  })
+
   test('the edit form is reachable by an admin', async ({ client }) => {
     const { owner, league } = await makeLeagueWithOwner()
     const ranking = await makeRanking(league)

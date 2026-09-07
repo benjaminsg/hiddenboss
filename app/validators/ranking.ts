@@ -58,6 +58,7 @@ export const createRankingValidator = vine.create({
   activityRequirements: vine.array(activityRequirement).optional(),
   /** Only matters once activity requirements are set. Omitted means the default. */
   dqPolicy: dqPolicy.optional(),
+  residencyRequirements: vine.array(locationFilter).optional(),
 })
 
 /**
@@ -70,4 +71,5 @@ export const updateRankingValidator = vine.create({
   endsAt: vine.date().optional(),
   activityRequirements: vine.array(activityRequirement).optional(),
   dqPolicy: dqPolicy.optional(),
+  residencyRequirements: vine.array(locationFilter).optional(),
 })
