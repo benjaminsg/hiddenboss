@@ -64,6 +64,9 @@ export interface ApiDefinition {
   }
   events: {
     destroy: typeof routes['events.destroy']
+    tournament: {
+      destroy: typeof routes['events.tournament.destroy']
+    }
     update: typeof routes['events.update']
     index: typeof routes['events.index']
     show: typeof routes['events.show']

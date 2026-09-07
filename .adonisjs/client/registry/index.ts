@@ -216,6 +216,12 @@ const routes = {
     tokens: [{"old":"/:league/events/:event","type":1,"val":"league","end":""},{"old":"/:league/events/:event","type":0,"val":"events","end":""},{"old":"/:league/events/:event","type":1,"val":"event","end":""}],
     types: placeholder as Registry['events.destroy']['types'],
   },
+  'events.tournament.destroy': {
+    methods: ["DELETE"],
+    pattern: '/:league/events/:event/tournament',
+    tokens: [{"old":"/:league/events/:event/tournament","type":1,"val":"league","end":""},{"old":"/:league/events/:event/tournament","type":0,"val":"events","end":""},{"old":"/:league/events/:event/tournament","type":1,"val":"event","end":""},{"old":"/:league/events/:event/tournament","type":0,"val":"tournament","end":""}],
+    types: placeholder as Registry['events.tournament.destroy']['types'],
+  },
   'events.update': {
     methods: ["PATCH"],
     pattern: '/:league/events/:event',

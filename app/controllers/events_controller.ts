@@ -220,9 +220,23 @@ export default class EventsController {
     const seen = new Set<string>()
     const zone = league.timezone ?? DEFAULT_TIMEZONE
 
+    /**
+     * Tournament data is canonical and shared instance-wide, so delete only when no other league
+     * shares the tournament.
+     */
+    const otherLeague = canManage
+      ? await db
+          .from('league_events as le')
+          .innerJoin('events as e', 'e.id', 'le.event_id')
+          .where('e.tournament_id', event.tournament.id)
+          .whereNot('le.league_id', league.id)
+          .first()
+      : null
+
     return inertia.render('leagues/event', {
       league: { slug: league.slug, name: league.name },
       canManage,
+      tournamentSharedWithOtherLeagues: otherLeague !== null,
       players: players.map((row) => ({ id: row.id, displayTag: row.display_tag })),
       event: {
         id: event.id,
@@ -310,6 +324,52 @@ export default class EventsController {
     }
 
     session.flash('success', 'Removed the event from this league')
+
+    return response.redirect().toRoute('events.index', { league: league.slug })
+  }
+
+  /**
+   * Deletes the tournament itself.
+   *
+   * Blocked when another league still counts any event of this tournament.
+   */
+  async destroyTournament({ league, params, response, session, auth }: HttpContext) {
+    const event = await this.loadCountedEvent(league.id, params.event)
+
+    if (!event) {
+      return response.notFound({ message: 'No such event in this league' })
+    }
+
+    const tournamentName = event.tournament.name
+
+    const otherLeague = await db
+      .from('league_events as le')
+      .innerJoin('events as e', 'e.id', 'le.event_id')
+      .where('e.tournament_id', event.tournament.id)
+      .whereNot('le.league_id', league.id)
+      .first()
+
+    if (otherLeague) {
+      session.flash(
+        'error',
+        `${tournamentName} is also counted by another league on this instance — it must remove it first.`
+      )
+      return response.redirect().back()
+    }
+
+    await event.tournament.delete()
+
+    await new LeaguePlayerReconcilerService().pruneUnbackedPlayers({
+      leagueId: league.id,
+      actorUserId: auth.user?.id ?? null,
+    })
+
+    const auto = await new StalenessService().markLeagueStale(league.id)
+    for (const rankingId of auto) {
+      await RecomputeRankingJob.dispatch({ rankingId })
+    }
+
+    session.flash('success', `Deleted ${tournamentName} entirely`)
 
     return response.redirect().toRoute('events.index', { league: league.slug })
   }

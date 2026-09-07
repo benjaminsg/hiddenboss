@@ -3,15 +3,15 @@ import { useState } from 'react'
 import { Form, Link } from '@adonisjs/inertia/react'
 import LeagueNav from '../../components/league_nav.js'
 import PlayerLinkList from '../../components/player_link_list.js'
-import AutocompleteInput from '../../components/autocomplete_input.js'
-import LocationAutocompleteInput from '../../components/location_autocomplete_input.js'
-import { useLocationSuggestions } from '../../hooks/use_location_suggestions.js'
+import EntityAutocompleteField from '../../components/entity_autocomplete_field.js'
+import LocationFields from '../../components/location_fields.js'
 import { formatLocation } from '../../lib/format_location.js'
 import { confirmSubmit } from '../../lib/confirm_submit.js'
 
 type Props = {
   league: { slug: string; name: string }
   canManage: boolean
+  tournamentSharedWithOtherLeagues: boolean
   event: {
     id: string
     name: string
@@ -72,10 +72,6 @@ type EventEditFormProps = {
   country: string | null
 }
 
-/**
- * Own component, not inlined below: it needs `useLocationSuggestions` state
- * per field, which only makes sense attached to a stable component instance.
- */
 const EventEditForm: React.FC<EventEditFormProps> = ({
   league,
   event,
@@ -86,19 +82,6 @@ const EventEditForm: React.FC<EventEditFormProps> = ({
   state,
   country,
 }) => {
-  const [cityValue, setCityValue] = useState(city ?? '')
-  const [stateValue, setStateValue] = useState(state ?? '')
-  const [countryValue, setCountryValue] = useState(country ?? '')
-
-  const citySuggestions = useLocationSuggestions(league, 'city', cityValue, {
-    country: countryValue || undefined,
-    state: stateValue || undefined,
-  })
-  const stateSuggestions = useLocationSuggestions(league, 'state', stateValue, {
-    country: countryValue || undefined,
-  })
-  const countrySuggestions = useLocationSuggestions(league, 'country', countryValue)
-
   return (
     <Form route="events.update" routeParams={{ league, event }}>
       {({ errors, processing }) => (
@@ -115,42 +98,7 @@ const EventEditForm: React.FC<EventEditFormProps> = ({
           </label>
           <label>
             Location
-            <div className="location-fields">
-              <LocationAutocompleteInput
-                name="city"
-                ariaLabel="City"
-                placeholder="city"
-                value={cityValue}
-                suggestions={citySuggestions}
-                onChange={setCityValue}
-                onSelect={(suggestion) => {
-                  setCityValue(suggestion.city ?? suggestion.label)
-                  if (suggestion.state) setStateValue(suggestion.state)
-                  if (suggestion.country) setCountryValue(suggestion.country)
-                }}
-              />
-              <LocationAutocompleteInput
-                name="state"
-                ariaLabel="State or province"
-                placeholder="state/province"
-                value={stateValue}
-                suggestions={stateSuggestions}
-                onChange={setStateValue}
-                onSelect={(suggestion) => {
-                  setStateValue(suggestion.state ?? suggestion.label)
-                  if (suggestion.country) setCountryValue(suggestion.country)
-                }}
-              />
-              <LocationAutocompleteInput
-                name="country"
-                ariaLabel="Country"
-                placeholder="country"
-                value={countryValue}
-                suggestions={countrySuggestions}
-                onChange={setCountryValue}
-                onSelect={(suggestion) => setCountryValue(suggestion.country ?? suggestion.label)}
-              />
-            </div>
+            <LocationFields league={league} city={city} state={state} country={country} />
           </label>
           <button type="submit" disabled={processing}>
             Save
@@ -167,8 +115,6 @@ const EventEditForm: React.FC<EventEditFormProps> = ({
   )
 }
 
-type PlayerSuggestion = { label: string; id: string }
-
 /**
  * Moves one imported account to another player, or splits it out into a player
  * created for it.
@@ -180,16 +126,7 @@ const ReassignForm: React.FC<{
   players: Props['players']
 }> = ({ leagueSlug, platformAccountId, gamerTag, players }) => {
   const [creating, setCreating] = useState(false)
-  const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState('')
-
-  const needle = query.trim().toLowerCase()
-  const matches: PlayerSuggestion[] = needle
-    ? players
-        .filter((player) => player.displayTag.toLowerCase().includes(needle))
-        .slice(0, 8)
-        .map((player) => ({ label: player.displayTag, id: player.id }))
-    : []
 
   return (
     <Form route="identity.update" routeParams={{ league: leagueSlug }}>
@@ -214,23 +151,14 @@ const ReassignForm: React.FC<{
             </>
           ) : (
             <>
-              <AutocompleteInput<PlayerSuggestion>
+              <EntityAutocompleteField
+                name="leaguePlayerId"
+                items={players}
+                label={(player) => player.displayTag}
                 ariaLabel="Reassign to player"
                 placeholder="Reassign to…"
-                value={query}
-                suggestions={matches}
-                keyOf={(suggestion) => suggestion.id}
-                onChange={(value) => {
-                  setQuery(value)
-                  // Editing after a pick invalidates it — force another choice.
-                  setSelectedId('')
-                }}
-                onSelect={(suggestion) => {
-                  setQuery(suggestion.label)
-                  setSelectedId(suggestion.id)
-                }}
+                onSelectionChange={setSelectedId}
               />{' '}
-              {selectedId && <input type="hidden" name="leaguePlayerId" value={selectedId} />}
               <button type="button" onClick={() => setCreating(true)}>
                 New player
               </button>{' '}
@@ -315,7 +243,15 @@ const IdentityTable: React.FC<{
   )
 }
 
-const EventResults: React.FC<Props> = ({ league, canManage, event, players, entrants, sets }) => {
+const EventResults: React.FC<Props> = ({
+  league,
+  canManage,
+  tournamentSharedWithOtherLeagues,
+  event,
+  players,
+  entrants,
+  sets,
+}) => {
   return (
     <>
       <LeagueNav slug={league.slug} name={league.name} canManage={canManage} />
@@ -372,6 +308,40 @@ const EventResults: React.FC<Props> = ({ league, canManage, event, players, entr
                 </div>
               )}
             </Form>
+
+            {tournamentSharedWithOtherLeagues ? (
+              <div className="danger-action">
+                <p>
+                  {event.tournamentName} is also counted by another league on this instance, so it
+                  can&apos;t be deleted outright — that league would lose its history with no say in
+                  it. It has to remove it first.
+                </p>
+              </div>
+            ) : (
+              <Form
+                route="events.tournament.destroy"
+                routeParams={{ league: league.slug, event: event.id }}
+              >
+                {({ processing }) => (
+                  <div className="danger-action">
+                    <p>
+                      Permanently deletes {event.tournamentName} — every event, bracket and set
+                      under it, not just this one. Cannot be undone; re-importing starts from
+                      scratch.
+                    </p>
+                    <button
+                      type="submit"
+                      disabled={processing}
+                      onClick={confirmSubmit(
+                        `Permanently delete ${event.tournamentName}? This removes every event, bracket and set under it, for every league on this instance. This cannot be undone.`
+                      )}
+                    >
+                      Delete tournament entirely
+                    </button>
+                  </div>
+                )}
+              </Form>
+            )}
           </div>
         </details>
       )}

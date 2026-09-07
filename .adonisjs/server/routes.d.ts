@@ -39,6 +39,7 @@ export type ScannedRoutes = {
     'players.attendance.store': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'player': ParamValue} }
     'players.attendance.destroy': { paramsTuple: [ParamValue,ParamValue,ParamValue]; params: {'league': ParamValue,'player': ParamValue,'eventAttendance': ParamValue} }
     'events.destroy': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'event': ParamValue} }
+    'events.tournament.destroy': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'event': ParamValue} }
     'events.update': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'event': ParamValue} }
     'credentials.index': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'credentials.update': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'platform': ParamValue} }
@@ -127,6 +128,7 @@ export type ScannedRoutes = {
     'rankings.eligibilityOverrides.destroy': { paramsTuple: [ParamValue,ParamValue,ParamValue]; params: {'league': ParamValue,'ranking': ParamValue,'override': ParamValue} }
     'players.attendance.destroy': { paramsTuple: [ParamValue,ParamValue,ParamValue]; params: {'league': ParamValue,'player': ParamValue,'eventAttendance': ParamValue} }
     'events.destroy': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'event': ParamValue} }
+    'events.tournament.destroy': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'event': ParamValue} }
   }
   PUT: {
     'credentials.update': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'platform': ParamValue} }

@@ -119,6 +119,13 @@ router
     router.delete('events/:event', [controllers.Events, 'destroy']).as('events.destroy')
 
     /**
+     * Deletes the whole tournament, not just a league's link to it.
+     */
+    router
+      .delete('events/:event/tournament', [controllers.Events, 'destroyTournament'])
+      .as('events.tournament.destroy')
+
+    /**
      * Correcting tournament data
      */
     router.patch('events/:event', [controllers.Events, 'update']).as('events.update')

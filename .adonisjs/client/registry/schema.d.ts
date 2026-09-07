@@ -427,6 +427,18 @@ export interface Registry {
       errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/events_controller').default['destroy']>>>
     }
   }
+  'events.tournament.destroy': {
+    methods: ["DELETE"]
+    pattern: '/:league/events/:event/tournament'
+    types: {
+      body: {}
+      paramsTuple: [ParamValue, ParamValue]
+      params: { league: ParamValue; event: ParamValue }
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/events_controller').default['destroyTournament']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/events_controller').default['destroyTournament']>>>
+    }
+  }
   'events.update': {
     methods: ["PATCH"]
     pattern: '/:league/events/:event'
