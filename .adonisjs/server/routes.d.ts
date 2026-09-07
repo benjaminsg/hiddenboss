@@ -23,6 +23,7 @@ export type ScannedRoutes = {
     'leagues.clear': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'imports.index': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'imports.store': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
+    'imports.cancel': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'import': ParamValue} }
     'rankings.create': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'rankings.store': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'rankings.locations': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
@@ -103,6 +104,7 @@ export type ScannedRoutes = {
     'leagues.store': { paramsTuple?: []; params?: {} }
     'leagues.clear': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'imports.store': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
+    'imports.cancel': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'import': ParamValue} }
     'rankings.store': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }
     'rankings.recompute': { paramsTuple: [ParamValue,ParamValue]; params: {'league': ParamValue,'ranking': ParamValue} }
     'identity.update': { paramsTuple: [ParamValue]; params: {'league': ParamValue} }

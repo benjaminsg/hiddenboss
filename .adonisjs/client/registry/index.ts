@@ -120,6 +120,12 @@ const routes = {
     tokens: [{"old":"/:league/imports","type":1,"val":"league","end":""},{"old":"/:league/imports","type":0,"val":"imports","end":""}],
     types: placeholder as Registry['imports.store']['types'],
   },
+  'imports.cancel': {
+    methods: ["POST"],
+    pattern: '/:league/imports/:import/cancel',
+    tokens: [{"old":"/:league/imports/:import/cancel","type":1,"val":"league","end":""},{"old":"/:league/imports/:import/cancel","type":0,"val":"imports","end":""},{"old":"/:league/imports/:import/cancel","type":1,"val":"import","end":""},{"old":"/:league/imports/:import/cancel","type":0,"val":"cancel","end":""}],
+    types: placeholder as Registry['imports.cancel']['types'],
+  },
   'rankings.create': {
     methods: ["GET","HEAD"],
     pattern: '/:league/rankings/new',

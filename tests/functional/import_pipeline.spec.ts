@@ -18,6 +18,8 @@ import ImportEventJob from '#jobs/import_event_job'
 import { errors as queueErrors } from '@boringnode/queue'
 import { FakePlatformAdapter } from '../unit/platforms/fake_adapter.js'
 import type { EventRef } from '#lib/platforms/contracts'
+import type { CanonicalBracket, CanonicalEntrant } from '#lib/platforms/canonical'
+import type { LocationFilter } from '#lib/geo/region_filter'
 
 /**
  * These tests truncate rather than wrapping each test in a transaction.
@@ -48,12 +50,13 @@ test.group('import pipeline', (group) => {
     return league
   }
 
-  async function startImport(league: League) {
+  async function startImport(league: League, regionFilter: LocationFilter[] = []) {
     const eventImport = await EventImport.create({
       leagueId: league.id,
       platformKey: 'fake',
       targetUrl: 'https://fake.test/t/fake-major',
       status: 'queued',
+      regionFilter,
     })
 
     return new EventImporterService().run({ eventImportId: eventImport.id })
@@ -320,6 +323,149 @@ test.group('import pipeline', (group) => {
     const reloaded = await EventImport.findOrFail(finished.id)
     assert.equal(reloaded.status, 'ok', 'the import itself completed')
     assert.match(reloaded.error!, /identity mapping/)
+  })
+
+  /**
+   * Alice (CA) beats Bob (no reported location) — the base fixture's only
+   * set, carrying its character-selection data — and also beats a third
+   * entrant, Carol (also CA), added here. A `state: 'CA'` filter should keep
+   * only Alice-vs-Carol.
+   */
+  class RegionalFixture extends FakePlatformAdapter {
+    protected override entrants(): CanonicalEntrant[] {
+      return [
+        ...super.entrants(),
+        {
+          externalId: 'en3',
+          name: 'Carol',
+          seed: 3,
+          placement: 3,
+          isDisqualified: false,
+          participants: [
+            {
+              externalUserId: 'u3',
+              gamerTag: 'Carol',
+              prefix: null,
+              pronouns: null,
+              profileSlug: null,
+              country: 'US',
+              state: 'CA',
+              city: 'San Francisco',
+            },
+          ],
+        },
+      ]
+    }
+
+    protected override bracket(): CanonicalBracket {
+      const base = super.bracket()
+
+      return {
+        ...base,
+        sets: [
+          ...base.sets,
+          {
+            externalId: 's2',
+            state: 'completed',
+            round: 1,
+            identifier: 'B',
+            fullRoundText: 'Winners Final',
+            ordinal: 2,
+            entrantAExternalId: 'en1',
+            entrantBExternalId: 'en3',
+            winnerEntrantExternalId: 'en3',
+            scoreA: 1,
+            scoreB: 3,
+            entrantADisqualified: false,
+            entrantBDisqualified: false,
+            completedAt: new Date('2026-03-02T20:00:00Z'),
+            games: [],
+          },
+        ],
+      }
+    }
+  }
+
+  test('a region filter keeps only entrants from those regions, and the sets between them', async ({
+    assert,
+  }) => {
+    platforms.unregister('fake')
+    platforms.register(new RegionalFixture())
+
+    const league = await seedLeague()
+    const finished = await startImport(league, [{ state: 'CA' }])
+
+    assert.equal(finished.status, 'ok')
+
+    const sets = await TournamentSet.all()
+    assert.lengthOf(sets, 1)
+    assert.equal(sets[0].externalId, 's2')
+
+    // Bob (no reported location) is never written at all, not merely
+    // excluded from sets — only Alice and Carol, both CA, qualify.
+    const entrants = await Entrant.all()
+    assert.lengthOf(entrants, 2)
+    assert.sameMembers(
+      entrants.map((entrant) => entrant.name),
+      ['Alice', 'Carol']
+    )
+    assert.lengthOf(await PlatformAccount.all(), 2)
+  })
+
+  test('capabilities reflect the raw import, even when the set carrying them was filtered out', async ({
+    assert,
+  }) => {
+    platforms.unregister('fake')
+    platforms.register(new RegionalFixture())
+
+    const league = await seedLeague()
+    // Alice-vs-Bob — the set with character selections — is excluded (Bob
+    // has no reported location), leaving zero written sets with games.
+    const finished = await startImport(league, [{ city: 'San Francisco' }])
+
+    assert.lengthOf(await SetGame.all(), 0)
+    assert.lengthOf(await SetGameSelection.all(), 0)
+
+    const tournament = await Tournament.findOrFail(finished.tournamentId!)
+    assert.isTrue(tournament.capabilities.characterSelections)
+  })
+
+  test('a filtered import of an event already counted unfiltered is rejected', async ({
+    assert,
+  }) => {
+    const league = await seedLeague()
+    await startImport(league)
+
+    await assert.rejects(
+      () => startImport(league, [{ state: 'CA' }]),
+      /already counted by this league under a different/
+    )
+
+    // Nothing about the existing unfiltered link changed.
+    const link = await LeagueEvent.query().where('leagueId', league.id).firstOrFail()
+    assert.deepEqual(link.regionFilter, [])
+  })
+
+  test('re-importing under the exact same filter succeeds', async ({ assert }) => {
+    const league = await seedLeague()
+    await startImport(league, [{ state: 'CA' }])
+
+    const second = await startImport(league, [{ state: 'CA' }])
+
+    assert.equal(second.status, 'ok')
+  })
+
+  test('a normal unfiltered re-import of an already-filtered event is unaffected', async ({
+    assert,
+  }) => {
+    const league = await seedLeague()
+    await startImport(league, [{ state: 'CA' }])
+
+    const second = await startImport(league)
+
+    assert.equal(second.status, 'ok')
+    const link = await LeagueEvent.query().where('leagueId', league.id).firstOrFail()
+    assert.deepEqual(link.regionFilter, [])
   })
 })
 

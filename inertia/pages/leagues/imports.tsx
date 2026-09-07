@@ -1,7 +1,9 @@
 import type React from 'react'
 import { Form, Link } from '@adonisjs/inertia/react'
 import LeagueNav from '../../components/league_nav.js'
+import ResidencyRequirementsEditor from '../../components/residency_requirements_editor.js'
 import { useLiveUpdates } from '../../hooks/use_live_updates.js'
+import { confirmSubmit } from '../../lib/confirm_submit.js'
 
 type Props = {
   league: { slug: string; name: string }
@@ -18,7 +20,12 @@ type Props = {
     bracketsTotal: number | null
     error: string | null
     warning: string | null
-    counts: { entrants?: number; sets?: number } | null
+    counts: {
+      entrants?: number
+      sets?: number
+      regionFilteredOutSets?: number
+      regionFilteredOutEntrants?: number
+    } | null
   }>
 }
 
@@ -27,8 +34,8 @@ const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
    * The worker writes progress as it goes, so a queued or running import means
    * this page is already out of date.
    */
-  const running = imports.some(
-    (record) => record.status === 'queued' || record.status === 'running'
+  const running = imports.some((record) =>
+    ['queued', 'running', 'cancelling'].includes(record.status)
   )
   const { gaveUp } = useLiveUpdates(running, { only: ['imports'] })
 
@@ -69,6 +76,20 @@ const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
             </p>
             {errors.url && <p role="alert">{errors.url}</p>}
 
+            <details>
+              <summary>Region filter</summary>
+              <ResidencyRequirementsEditor
+                league={league.slug}
+                initial={[]}
+                errors={errors}
+                fieldName="regionFilter"
+                label="Region filter"
+                description="Only import matches where every player is from one of the regions below."
+                emptyText=""
+                addButtonText="+ Add region"
+              />
+            </details>
+
             <button type="submit" disabled={processing}>
               Import
             </button>
@@ -98,6 +119,7 @@ const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
                 <th>Tournament</th>
                 <th>Status</th>
                 <th>Progress</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -144,7 +166,32 @@ const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
                       <>
                         <br />
                         {record.counts.entrants ?? 0} entrants, {record.counts.sets} sets
+                        {/* Distinguishes "a region filter excluded most of this bracket" from "the bracket was just small." */}
+                        {Boolean(record.counts.regionFilteredOutEntrants) &&
+                          `, ${record.counts.regionFilteredOutEntrants} entrants excluded by region filter`}
+                        {Boolean(record.counts.regionFilteredOutSets) &&
+                          `, ${record.counts.regionFilteredOutSets} sets excluded by region filter`}
                       </>
+                    )}
+                  </td>
+                  <td>
+                    {(record.status === 'queued' || record.status === 'running') && (
+                      <Form
+                        route="imports.cancel"
+                        routeParams={{ league: league.slug, import: record.id }}
+                      >
+                        {({ processing }) => (
+                          <button
+                            type="submit"
+                            disabled={processing}
+                            onClick={confirmSubmit(
+                              'Cancel this import? Anything it already created will be rolled back.'
+                            )}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </Form>
                     )}
                   </td>
                 </tr>

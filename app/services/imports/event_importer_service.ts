@@ -2,6 +2,7 @@ import vine from '@vinejs/vine'
 import db from '@adonisjs/lucid/services/db'
 import logger from '@adonisjs/core/services/logger'
 import { DateTime } from 'luxon'
+import Event from '#models/event'
 import EventImport from '#models/event_import'
 import LeagueCredential from '#models/league_credential'
 import LeagueEvent from '#models/league_event'
@@ -11,6 +12,9 @@ import { PermanentPlatformError, PlatformError } from '#lib/platforms/errors'
 import { platforms } from '#lib/platforms/registry'
 import { createPlatformHttp } from '#lib/platforms/http'
 import { ValidatingSink } from '#lib/platforms/validating_sink'
+import { RegionFilteringSink } from '#lib/platforms/region_filtering_sink'
+import { regionsEqual } from '#lib/geo/region_filter'
+import { EventRegionReconcilerService } from '#services/imports/event_region_reconciler_service'
 import { TournamentWriterService } from '#services/imports/tournament_writer_service'
 import type { ImportSink, PlatformAdapter, PlatformFetch, EventRef } from '#lib/platforms/contracts'
 
@@ -28,6 +32,13 @@ export type HttpFactory = (adapter: PlatformAdapter, signal: AbortSignal) => Pla
 
 const liveHttpFactory: HttpFactory = (adapter, signal) =>
   createPlatformHttp({ platform: adapter.key, rateLimit: adapter.rateLimit, signal })
+
+class ImportCancelledError extends Error {
+  constructor() {
+    super('Import cancelled')
+    this.name = 'ImportCancelledError'
+  }
+}
 
 /**
  * Runs one tournament import end to end.
@@ -50,6 +61,14 @@ export class EventImporterService {
 
     const eventImport = await EventImport.findOrFail(eventImportId)
 
+    if (eventImport.isFinished) {
+      return eventImport
+    }
+
+    if (eventImport.status === 'cancelling') {
+      return this.finishCancelled(eventImport)
+    }
+
     eventImport.status = 'running'
     eventImport.stage = 'resolving'
     eventImport.error = null
@@ -66,9 +85,13 @@ export class EventImporterService {
        * pacing is a local concern needing no cross-process coordination.
        */
       return await this.withCredentialLock(eventImport, async () => {
-        return this.stream(adapter, ref, credentials, eventImport, controller.signal)
+        return this.stream(adapter, ref, credentials, eventImport, controller)
       })
     } catch (error) {
+      if (error instanceof ImportCancelledError) {
+        return this.finishCancelled(eventImport)
+      }
+
       eventImport.status = 'failed'
       eventImport.error = this.describe(error)
       eventImport.finishedAt = DateTime.now()
@@ -160,8 +183,9 @@ export class EventImporterService {
     ref: EventRef,
     credentials: Record<string, string>,
     eventImport: EventImport,
-    signal: AbortSignal
+    controller: AbortController
   ): Promise<EventImport> {
+    const signal = controller.signal
     const writer = new TournamentWriterService(adapter.key)
     const observer = new CapabilityObserver()
 
@@ -171,6 +195,8 @@ export class EventImporterService {
     await eventImport.save()
 
     let bracketsDone = 0
+
+    let eventCreatedByThisRun = false
 
     /**
      * Counted as records pass so an import that succeeded but contained nothing
@@ -186,33 +212,55 @@ export class EventImporterService {
      */
     const writing: ImportSink = {
       tournament: async (tournament) => {
-        signal.throwIfAborted()
+        await this.checkCancelled(eventImport, controller)
         eventImport.tournamentId = await writer.writeTournament(tournament)
         await eventImport.save()
       },
 
       event: async (event) => {
-        signal.throwIfAborted()
+        await this.checkCancelled(eventImport, controller)
+
+        const preexisting = await Event.query()
+          .where('tournamentId', eventImport.tournamentId!)
+          .where('externalId', event.externalId)
+          .first()
+        eventCreatedByThisRun = preexisting === null
+
         eventImport.eventId = await writer.writeEvent(event)
         await eventImport.save()
+
+        /**
+         * A different region filter on an already imported tournament is rejected.
+         */
+        if (eventImport.regionFilter.length > 0) {
+          const existing = await LeagueEvent.query()
+            .where('leagueId', eventImport.leagueId)
+            .where('eventId', eventImport.eventId)
+            .first()
+
+          if (existing && !regionsEqual(existing.regionFilter, eventImport.regionFilter)) {
+            throw new PermanentPlatformError(
+              'This event is already counted by this league under a different (or no) region filter — remove it from Events first, then re-import with this filter.',
+              { platform: adapter.key }
+            )
+          }
+        }
       },
 
       entrants: async (eventExternalId, entrants) => {
-        signal.throwIfAborted()
-        observer.observeEntrants(entrants)
+        await this.checkCancelled(eventImport, controller)
         await writer.writeEntrants(eventExternalId, entrants)
 
         counts.entrants += entrants.length
       },
 
       phase: async (eventExternalId, phase) => {
-        signal.throwIfAborted()
+        await this.checkCancelled(eventImport, controller)
         await writer.writePhase(eventExternalId, phase)
       },
 
       bracket: async (_eventExternalId, phaseExternalId, bracket) => {
-        signal.throwIfAborted()
-        observer.observeBracket(bracket)
+        await this.checkCancelled(eventImport, controller)
         await writer.writeBracket(phaseExternalId, bracket)
 
         counts.sets += bracket.sets.length
@@ -230,7 +278,7 @@ export class EventImporterService {
       },
 
       progress: async (_completed, total) => {
-        signal.throwIfAborted()
+        await this.checkCancelled(eventImport, controller)
         if (total === null) return
 
         eventImport.bracketsTotal = total
@@ -239,13 +287,43 @@ export class EventImporterService {
     }
 
     /**
+     * A region filter drops non-qualifying sets so capability observation sits in front of it.
+     */
+    const filtered: ImportSink =
+      eventImport.regionFilter.length > 0
+        ? new RegionFilteringSink(eventImport.regionFilter, writing)
+        : writing
+
+    const observing: ImportSink = {
+      tournament: (tournament) => filtered.tournament(tournament),
+      event: (event) => filtered.event(event),
+      entrants: async (eventExternalId, entrants) => {
+        observer.observeEntrants(entrants)
+        await filtered.entrants(eventExternalId, entrants)
+      },
+      phase: (eventExternalId, phase) => filtered.phase(eventExternalId, phase),
+      bracket: async (eventExternalId, phaseExternalId, bracket) => {
+        observer.observeBracket(bracket)
+        await filtered.bracket(eventExternalId, phaseExternalId, bracket)
+      },
+      progress: (completed, total, label) => filtered.progress(completed, total, label),
+    }
+
+    /**
      * Wrapped so contract violations fail this import with a specific message
      * rather than writing rows that are quietly wrong. Every adapter gets this,
      * including one nobody wrote a test for.
      */
-    const sink = new ValidatingSink(adapter.key, writing)
+    const sink = new ValidatingSink(adapter.key, observing)
 
-    await adapter.fetchEvent(ref, { credentials, http, signal, logger }, sink)
+    try {
+      await adapter.fetchEvent(ref, { credentials, http, signal, logger }, sink)
+    } catch (error) {
+      if (error instanceof ImportCancelledError) {
+        await this.rollbackCancelledImport(eventImport, eventCreatedByThisRun)
+      }
+      throw error
+    }
 
     const tournamentId = eventImport.tournamentId
     const eventId = eventImport.eventId
@@ -274,21 +352,65 @@ export class EventImporterService {
        */
       await LeagueEvent.updateOrCreate(
         { leagueId: eventImport.leagueId, eventId },
-        { addedByUserId: eventImport.createdByUserId },
+        { addedByUserId: eventImport.createdByUserId, regionFilter: eventImport.regionFilter },
         { client: trx }
       )
+
+      if (eventImport.regionFilter.length > 0) {
+        await new EventRegionReconcilerService().reconcile(eventId, { client: trx })
+      }
     })
+
+    const filteredOutSets = filtered instanceof RegionFilteringSink ? filtered.excludedSetCount : 0
+    const filteredOutEntrants =
+      filtered instanceof RegionFilteringSink ? filtered.excludedEntrantCount : 0
 
     eventImport.status = 'ok'
     eventImport.stage = 'done'
     eventImport.stats = {
       capabilities: observer.result,
       brackets: bracketsDone,
+      regionFilteredOutSets: filteredOutSets,
+      regionFilteredOutEntrants: filteredOutEntrants,
       ...counts,
     }
     eventImport.finishedAt = DateTime.now()
     await eventImport.save()
 
+    return eventImport
+  }
+
+  /**
+   * Polls the row for a cancellation request. Cross-process by necessity.
+   */
+  private async checkCancelled(
+    eventImport: EventImport,
+    controller: AbortController
+  ): Promise<void> {
+    controller.signal.throwIfAborted()
+
+    const row = await EventImport.query().where('id', eventImport.id).select('status').first()
+    if (row?.status === 'cancelling') {
+      controller.abort(new ImportCancelledError())
+    }
+
+    controller.signal.throwIfAborted()
+  }
+
+  private async rollbackCancelledImport(
+    eventImport: EventImport,
+    eventCreatedByThisRun: boolean
+  ): Promise<void> {
+    if (!eventCreatedByThisRun || !eventImport.eventId) return
+
+    await Event.query().where('id', eventImport.eventId).delete()
+    eventImport.eventId = null
+  }
+
+  private async finishCancelled(eventImport: EventImport): Promise<EventImport> {
+    eventImport.status = 'cancelled'
+    eventImport.finishedAt = DateTime.now()
+    await eventImport.save()
     return eventImport
   }
 

@@ -31,6 +31,7 @@ export interface ApiDefinition {
   imports: {
     index: typeof routes['imports.index']
     store: typeof routes['imports.store']
+    cancel: typeof routes['imports.cancel']
   }
   rankings: {
     create: typeof routes['rankings.create']

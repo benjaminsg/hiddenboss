@@ -1,11 +1,12 @@
 import { EventImportSchema } from '#database/schema'
 import { compose } from '@adonisjs/core/helpers'
-import { belongsTo } from '@adonisjs/lucid/orm'
+import { belongsTo, column } from '@adonisjs/lucid/orm'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import { withUuid } from '#models/mixins/with_uuid'
 import League from '#models/league'
 import Tournament from '#models/tournament'
 import Event from '#models/event'
+import type { LocationFilter } from '#lib/geo/region_filter'
 
 /**
  * A progress and audit record for one import, not an orchestrator: the job
@@ -13,6 +14,9 @@ import Event from '#models/event'
  * which stage failed.
  */
 export default class EventImport extends compose(EventImportSchema, withUuid) {
+  @column({ prepare: (value: LocationFilter[]) => JSON.stringify(value) })
+  declare regionFilter: LocationFilter[]
+
   @belongsTo(() => League)
   declare league: BelongsTo<typeof League>
 
@@ -24,7 +28,7 @@ export default class EventImport extends compose(EventImportSchema, withUuid) {
   declare event: BelongsTo<typeof Event>
 
   get isFinished() {
-    return ['ok', 'partial', 'failed'].includes(this.status)
+    return ['ok', 'partial', 'failed', 'cancelled'].includes(this.status)
   }
 
   /**

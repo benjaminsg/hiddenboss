@@ -11,7 +11,7 @@ const placeName = vine
   .maxLength(100)
   .regex(/^[\p{L}\p{M}\d\s'.,-]+$/u)
 
-const locationFilter = vine.object({
+export const locationFilter = vine.object({
   country: placeName.optional(),
   state: placeName.optional(),
   city: placeName.optional(),

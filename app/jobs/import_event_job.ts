@@ -34,7 +34,7 @@ export default class ImportEventJob extends Job<ImportTournamentPayload> {
       eventImportId: this.payload.eventImportId,
     })
 
-    if (eventImport.eventId) {
+    if (eventImport.status === 'ok' && eventImport.eventId) {
       await MapIdentitiesJob.dispatch({
         leagueId: eventImport.leagueId,
         eventId: eventImport.eventId,
@@ -59,7 +59,7 @@ export default class ImportEventJob extends Job<ImportTournamentPayload> {
     const eventImport = await EventImport.find(this.payload.eventImportId)
     if (!eventImport) return
 
-    if (eventImport.status !== 'ok') {
+    if (eventImport.status !== 'ok' && eventImport.status !== 'cancelled') {
       eventImport.status = 'failed'
       eventImport.finishedAt = DateTime.now()
     }

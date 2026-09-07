@@ -227,12 +227,24 @@ export interface Registry {
     methods: ["POST"]
     pattern: '/:league/imports'
     types: {
-      body: {}
+      body: ExtractBody<InferInput<(typeof import('#validators/import').importValidator)>>
       paramsTuple: [ParamValue]
       params: { league: ParamValue }
-      query: {}
+      query: ExtractQuery<InferInput<(typeof import('#validators/import').importValidator)>>
       response: ExtractResponse<Awaited<ReturnType<import('#controllers/imports_controller').default['store']>>>
-      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/imports_controller').default['store']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/imports_controller').default['store']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'imports.cancel': {
+    methods: ["POST"]
+    pattern: '/:league/imports/:import/cancel'
+    types: {
+      body: {}
+      paramsTuple: [ParamValue, ParamValue]
+      params: { league: ParamValue; import: ParamValue }
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/imports_controller').default['cancel']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/imports_controller').default['cancel']>>>
     }
   }
   'rankings.create': {

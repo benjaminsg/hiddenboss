@@ -86,7 +86,7 @@ export class EntrantSchema extends BaseModel {
 }
 
 export class EventImportSchema extends BaseModel {
-  static $columns = ['bracketsDone', 'bracketsTotal', 'createdAt', 'createdByUserId', 'error', 'eventId', 'finishedAt', 'id', 'leagueId', 'payload', 'platformKey', 'stage', 'stats', 'status', 'targetUrl', 'tournamentId', 'updatedAt'] as const
+  static $columns = ['bracketsDone', 'bracketsTotal', 'createdAt', 'createdByUserId', 'error', 'eventId', 'finishedAt', 'id', 'leagueId', 'payload', 'platformKey', 'regionFilter', 'stage', 'stats', 'status', 'targetUrl', 'tournamentId', 'updatedAt'] as const
   $columns = EventImportSchema.$columns
   @column()
   declare bracketsDone: number
@@ -110,6 +110,8 @@ export class EventImportSchema extends BaseModel {
   declare payload: Record<string, any> | null
   @column()
   declare platformKey: string
+  @column()
+  declare regionFilter: Record<string, any>
   @column()
   declare stage: string | null
   @column()
@@ -304,7 +306,7 @@ export class LeagueCredentialSchema extends BaseModel {
 }
 
 export class LeagueEventSchema extends BaseModel {
-  static $columns = ['addedByUserId', 'createdAt', 'eventId', 'id', 'leagueId', 'multiplier', 'tier', 'updatedAt'] as const
+  static $columns = ['addedByUserId', 'createdAt', 'eventId', 'id', 'leagueId', 'multiplier', 'regionFilter', 'tier', 'updatedAt'] as const
   $columns = LeagueEventSchema.$columns
   @column()
   declare addedByUserId: string | null
@@ -318,6 +320,8 @@ export class LeagueEventSchema extends BaseModel {
   declare leagueId: string
   @column()
   declare multiplier: string | null
+  @column()
+  declare regionFilter: Record<string, any>
   @column()
   declare tier: string | null
   @column.dateTime({ autoCreate: true, autoUpdate: true })

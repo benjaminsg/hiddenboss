@@ -64,6 +64,7 @@ router
 
     router.get('imports', [controllers.Imports, 'index']).as('imports.index')
     router.post('imports', [controllers.Imports, 'store']).as('imports.store')
+    router.post('imports/:import/cancel', [controllers.Imports, 'cancel']).as('imports.cancel')
 
     router.get('rankings/new', [controllers.Rankings, 'create']).as('rankings.create')
     router.post('rankings', [controllers.Rankings, 'store']).as('rankings.store')
