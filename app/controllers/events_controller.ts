@@ -4,6 +4,7 @@ import LeagueEvent from '#models/league_event'
 import LeaguePolicy from '#policies/league_policy'
 import RecomputeRankingJob from '#jobs/recompute_ranking_job'
 import { StalenessService } from '#services/rankings/staleness_service'
+import { LeaguePlayerReconcilerService } from '#services/identity/league_player_reconciler_service'
 import { updateEventValidator } from '#validators/event'
 import { DEFAULT_TIMEZONE } from '#lib/geo/timezones'
 import { fromLocalDate, toLocalDate } from '#lib/time/local_date'
@@ -273,7 +274,7 @@ export default class EventsController {
    * later — re-pasting the link upserts the same canonical rows and recreates
    * this league's `league_events` row.
    */
-  async destroy({ league, params, response, session }: HttpContext) {
+  async destroy({ league, params, response, session, auth }: HttpContext) {
     const counted = isUuid(params.event)
       ? await LeagueEvent.query()
           .where('leagueId', league.id)
@@ -286,6 +287,16 @@ export default class EventsController {
     }
 
     await counted.delete()
+
+    /**
+     * Unlinking removes the join row but not the league players the import built,
+     * so players now backed by no counted event are pruned here — otherwise a
+     * re-import under a different filter strands the old set.
+     */
+    await new LeaguePlayerReconcilerService().pruneUnbackedPlayers({
+      leagueId: league.id,
+      actorUserId: auth.user?.id ?? null,
+    })
 
     /**
      * The next recompute of each ranking replays only the events this league

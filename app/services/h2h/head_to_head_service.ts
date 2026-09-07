@@ -1,5 +1,8 @@
 import db from '@adonisjs/lucid/services/db'
 import LeaguePlayer from '#models/league_player'
+import { entrantMatchesRegions, parseRegionFilter } from '#lib/geo/region_filter'
+import type { RegionLocation } from '#lib/geo/region_filter'
+import { EntrantRegionService } from '#services/identity/entrant_region_service'
 
 export interface HeadToHeadPlayer {
   id: string
@@ -23,6 +26,7 @@ interface SetRow {
   entrant_a_id: string
   entrant_b_id: string
   winner_entrant_id: string
+  region_filter: unknown
 }
 
 /**
@@ -58,7 +62,8 @@ export class HeadToHeadService {
         'sets.id as set_id',
         'sets.entrant_a_id',
         'sets.entrant_b_id',
-        'sets.winner_entrant_id'
+        'sets.winner_entrant_id',
+        'league_events.region_filter as region_filter'
       )
 
     if (rows.length === 0) {
@@ -77,6 +82,14 @@ export class HeadToHeadService {
 
     const sides = await this.entrantSides(leagueId, rows)
 
+    const regionBySet = new Map(
+      rows.map((row) => [row.set_id, parseRegionFilter(row.region_filter)])
+    )
+    const entrantIds = [...new Set(rows.flatMap((row) => [row.entrant_a_id, row.entrant_b_id]))]
+    const entrantRegions = [...regionBySet.values()].some((filter) => filter.length > 0)
+      ? await new EntrantRegionService().regionsByEntrant(leagueId, entrantIds)
+      : new Map<string, RegionLocation[]>()
+
     const totals = new Map<string, { loId: string; hiId: string; loWins: number; hiWins: number }>()
 
     for (const row of rows) {
@@ -86,6 +99,15 @@ export class HeadToHeadService {
       // Doubles/crew sides, or an entrant identity resolution hasn't caught
       // up to yet, are not attributable to a single player pair.
       if (sideA.length !== 1 || sideB.length !== 1) continue
+
+      const regions = regionBySet.get(row.set_id) ?? []
+      if (
+        regions.length > 0 &&
+        (!entrantMatchesRegions(entrantRegions.get(row.entrant_a_id) ?? [], regions) ||
+          !entrantMatchesRegions(entrantRegions.get(row.entrant_b_id) ?? [], regions))
+      ) {
+        continue
+      }
 
       const [playerA] = sideA
       const [playerB] = sideB

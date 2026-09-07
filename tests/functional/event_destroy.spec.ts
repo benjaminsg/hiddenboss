@@ -5,6 +5,9 @@ import League from '#models/league'
 import LeagueAdmin from '#models/league_admin'
 import LeagueCredential from '#models/league_credential'
 import LeagueEvent from '#models/league_event'
+import LeaguePlayer from '#models/league_player'
+import LeaguePlayerAccount from '#models/league_player_account'
+import IdentityEvent from '#models/identity_event'
 import Ranking from '#models/ranking'
 import User from '#models/user'
 import { platforms } from '#lib/platforms/registry'
@@ -106,6 +109,68 @@ test.group('event destroy', (group) => {
       .where('eventId', eventImport.eventId!)
       .first()
     assert.isNotNull(link, 're-importing should recreate the link')
+  })
+
+  test('unlinking an event prunes the league players its import built', async ({
+    client,
+    assert,
+  }) => {
+    const { owner, league } = await seedLeagueWithOwner()
+    const eventImport = await importEvent(league)
+
+    assert.isNotEmpty(await LeaguePlayer.query().where('leagueId', league.id))
+
+    await client
+      .delete(`/${league.slug}/events/${eventImport.eventId}`)
+      .loginAs(owner)
+      .withCsrfToken()
+
+    const remaining = await LeaguePlayer.query().where('leagueId', league.id)
+    assert.lengthOf(remaining, 0)
+
+    const events = await IdentityEvent.query().where('leagueId', league.id).where('kind', 'unlink')
+    assert.isAbove(events.length, 0, 'each pruned player leaves an audit row')
+  })
+
+  test('re-importing after an unlink does not leave the old league players behind', async ({
+    client,
+    assert,
+  }) => {
+    const { owner, league } = await seedLeagueWithOwner()
+    const eventImport = await importEvent(league)
+    const initial = await LeaguePlayer.query().where('leagueId', league.id)
+
+    await client
+      .delete(`/${league.slug}/events/${eventImport.eventId}`)
+      .loginAs(owner)
+      .withCsrfToken()
+
+    await importEvent(league)
+
+    const rebuilt = await LeaguePlayer.query().where('leagueId', league.id)
+    assert.lengthOf(rebuilt, initial.length)
+  })
+
+  test('a manually held player survives an unlink', async ({ client, assert }) => {
+    const { owner, league } = await seedLeagueWithOwner()
+    const eventImport = await importEvent(league)
+
+    const [held, ...rest] = await LeaguePlayer.query()
+      .where('leagueId', league.id)
+      .orderBy('displayTag')
+    assert.isNotEmpty(rest)
+    await LeaguePlayerAccount.query().where('leaguePlayerId', held.id).update({ source: 'manual' })
+
+    await client
+      .delete(`/${league.slug}/events/${eventImport.eventId}`)
+      .loginAs(owner)
+      .withCsrfToken()
+
+    const survivors = await LeaguePlayer.query().where('leagueId', league.id)
+    assert.deepEqual(
+      survivors.map((player) => player.id),
+      [held.id]
+    )
   })
 
   test('marks manual rankings stale without recomputing them', async ({ client, assert }) => {

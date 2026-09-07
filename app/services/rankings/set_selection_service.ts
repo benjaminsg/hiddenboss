@@ -3,6 +3,9 @@ import type Ranking from '#models/ranking'
 import type { RatableSet } from '#lib/rankings/contracts'
 import { DEFAULT_TIMEZONE } from '#lib/geo/timezones'
 import { fromLocalDate } from '#lib/time/local_date'
+import { entrantMatchesRegions, parseRegionFilter } from '#lib/geo/region_filter'
+import type { RegionLocation } from '#lib/geo/region_filter'
+import { EntrantRegionService } from '#services/identity/entrant_region_service'
 
 /**
  * Which sets a ranking counts, in the order they should be replayed.
@@ -35,6 +38,7 @@ interface SetRow {
   tournament_country: string | null
   tournament_state: string | null
   tournament_city: string | null
+  region_filter: unknown
 }
 
 export class SetSelectionService {
@@ -85,7 +89,8 @@ export class SetSelectionService {
         'sets.entrant_b_disqualified',
         'tournaments.country as tournament_country',
         'tournaments.state as tournament_state',
-        'tournaments.city as tournament_city'
+        'tournaments.city as tournament_city',
+        'league_events.region_filter as region_filter'
       )
       /**
        * Tournaments group first so each one's sets stay contiguous; the
@@ -119,6 +124,14 @@ export class SetSelectionService {
 
     const sides = await this.entrantSides(ranking.leagueId, rows)
 
+    const regionBySet = new Map(
+      rows.map((row) => [row.set_id, parseRegionFilter(row.region_filter)])
+    )
+    const entrantIds = [...new Set(rows.flatMap((row) => [row.entrant_a_id, row.entrant_b_id]))]
+    const entrantRegions = [...regionBySet.values()].some((filter) => filter.length > 0)
+      ? await new EntrantRegionService().regionsByEntrant(ranking.leagueId, entrantIds)
+      : new Map<string, RegionLocation[]>()
+
     return rows
       .map((row) => {
         const sideA = sides.get(row.entrant_a_id) ?? []
@@ -130,6 +143,19 @@ export class SetSelectionService {
          * better than crediting it to the wrong person.
          */
         if (sideA.length === 0 || sideB.length === 0) return null
+
+        /**
+         * The set rows are the union of every league's import of this event, so a league that
+         * counts it under a region filter re-applies that here
+         */
+        const regions = regionBySet.get(row.set_id) ?? []
+        if (
+          regions.length > 0 &&
+          (!entrantMatchesRegions(entrantRegions.get(row.entrant_a_id) ?? [], regions) ||
+            !entrantMatchesRegions(entrantRegions.get(row.entrant_b_id) ?? [], regions))
+        ) {
+          return null
+        }
 
         return {
           setId: row.set_id,

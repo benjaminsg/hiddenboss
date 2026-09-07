@@ -4,6 +4,7 @@ import LeaguePlayer from '#models/league_player'
 import LeaguePlayerAccount from '#models/league_player_account'
 import PlatformAccount from '#models/platform_account'
 import { PlayerSlugService } from '#services/identity/player_slug_service'
+import { LeaguePlayerReconcilerService } from '#services/identity/league_player_reconciler_service'
 import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 
 export interface ResolveRequest {
@@ -44,8 +45,25 @@ export class IdentityResolverService {
     const accounts = await this.accountsIn(eventId)
     const result: ResolveResult = { mapped: 0, created: 0, reused: 0 }
 
-    if (accounts.length === 0) return result
+    if (accounts.length > 0) {
+      await this.resolve(leagueId, accounts, result)
+    }
 
+    /**
+     * A re-import under a tighter region filter writes the new region's
+     * entrants without removing the old ones, so the previous region's
+     * players have to be pruned after resolution rather than during it.
+     */
+    await new LeaguePlayerReconcilerService().pruneUnbackedPlayers({ leagueId, actorUserId: null })
+
+    return result
+  }
+
+  private async resolve(
+    leagueId: string,
+    accounts: PlatformAccount[],
+    result: ResolveResult
+  ): Promise<void> {
     await db.transaction(async (trx) => {
       for (const account of accounts) {
         const existing = await LeaguePlayerAccount.query({ client: trx })
@@ -86,8 +104,6 @@ export class IdentityResolverService {
         await League.query({ client: trx }).where('id', leagueId).increment('identity_version', 1)
       }
     })
-
-    return result
   }
 
   /**

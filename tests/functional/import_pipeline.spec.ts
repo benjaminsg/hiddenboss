@@ -12,8 +12,13 @@ import Bracket from '#models/bracket'
 import SetGame from '#models/set_game'
 import SetGameSelection from '#models/set_game_selection'
 import Tournament from '#models/tournament'
+import Ranking from '#models/ranking'
+import LeaguePlayer from '#models/league_player'
 import { platforms } from '#lib/platforms/registry'
 import { EventImporterService } from '#services/imports/event_importer_service'
+import { IdentityResolverService } from '#services/identity/identity_resolver_service'
+import { LeaguePlayerReconcilerService } from '#services/identity/league_player_reconciler_service'
+import { SetSelectionService } from '#services/rankings/set_selection_service'
 import ImportEventJob from '#jobs/import_event_job'
 import { errors as queueErrors } from '@boringnode/queue'
 import { FakePlatformAdapter } from '../unit/platforms/fake_adapter.js'
@@ -466,6 +471,107 @@ test.group('import pipeline', (group) => {
     assert.equal(second.status, 'ok')
     const link = await LeagueEvent.query().where('leagueId', league.id).firstOrFail()
     assert.deepEqual(link.regionFilter, [])
+  })
+
+  test('the region filter is re-applied on read, so relocating a player drops their sets', async ({
+    assert,
+  }) => {
+    platforms.unregister('fake')
+    platforms.register(new RegionalFixture())
+
+    const league = await seedLeague()
+    const finished = await startImport(league, [{ state: 'CA' }])
+    assert.equal(finished.status, 'ok')
+
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: finished.eventId! })
+
+    const ranking = await Ranking.create({
+      leagueId: league.id,
+      slug: 'pr',
+      name: 'PR',
+      algorithm: 'elo',
+      recomputeMode: 'manual',
+      published: true,
+    })
+    const selection = new SetSelectionService()
+
+    assert.lengthOf(await selection.forRanking(ranking), 1)
+
+    const alice = await LeaguePlayer.query()
+      .where('leagueId', league.id)
+      .where('displayTag', 'Alice')
+      .firstOrFail()
+    alice.country = 'US'
+    alice.state = 'NY'
+    await alice.save()
+
+    assert.lengthOf(await selection.forRanking(ranking), 0)
+    assert.lengthOf(await TournamentSet.all(), 1)
+  })
+
+  async function leaguePlayerTags(league: League) {
+    const players = await LeaguePlayer.query().where('leagueId', league.id)
+    return players.map((player) => player.displayTag)
+  }
+
+  async function entrantNames() {
+    const entrants = await Entrant.all()
+    return entrants.map((entrant) => entrant.name)
+  }
+
+  test("re-importing under a new filter prunes the previous filter's league players", async ({
+    assert,
+  }) => {
+    platforms.unregister('fake')
+    platforms.register(new RegionalFixture())
+
+    const league = await seedLeague()
+
+    const first = await startImport(league, [{ city: 'Los Angeles' }])
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: first.eventId! })
+    assert.sameMembers(await leaguePlayerTags(league), ['Alice'])
+
+    await LeagueEvent.query().where('leagueId', league.id).where('eventId', first.eventId!).delete()
+
+    const second = await startImport(league, [{ city: 'San Francisco' }])
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: second.eventId! })
+
+    assert.sameMembers(await leaguePlayerTags(league), ['Carol'])
+    assert.sameMembers(await entrantNames(), ['Carol'])
+  })
+
+  test('destroy tournament, import filtered, unlink, re-import filtered leaves only the new region', async ({
+    assert,
+  }) => {
+    platforms.unregister('fake')
+    platforms.register(new RegionalFixture())
+
+    const league = await seedLeague()
+    const prune = () =>
+      new LeaguePlayerReconcilerService().pruneUnbackedPlayers({
+        leagueId: league.id,
+        actorUserId: null,
+      })
+
+    const seed = await startImport(league)
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: seed.eventId! })
+    await Tournament.query().where('id', seed.tournamentId!).delete()
+    await prune()
+    assert.lengthOf(await leaguePlayerTags(league), 0)
+
+    const la = await startImport(league, [{ city: 'Los Angeles' }])
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: la.eventId! })
+    assert.sameMembers(await leaguePlayerTags(league), ['Alice'])
+
+    await LeagueEvent.query().where('leagueId', league.id).where('eventId', la.eventId!).delete()
+    await prune()
+    assert.lengthOf(await leaguePlayerTags(league), 0)
+
+    const sf = await startImport(league, [{ city: 'San Francisco' }])
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: sf.eventId! })
+
+    assert.sameMembers(await leaguePlayerTags(league), ['Carol'])
+    assert.sameMembers(await entrantNames(), ['Carol'])
   })
 })
 
