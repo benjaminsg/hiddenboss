@@ -162,8 +162,8 @@ export default class EventsController {
         `p."order" asc nulls last, b.id asc, s.completed_at asc nulls last, s.ordinal asc nulls last`
       )
 
-    /** One row per participant of a team, so the roster groups rather than repeats. */
-    const rosters = new Map<
+    /** One row per participant of a team, so entrants group rather than repeat. */
+    const entrantPlayers = new Map<
       string,
       Array<{
         tag: string
@@ -177,7 +177,7 @@ export default class EventsController {
     >()
 
     for (const row of entrants) {
-      const list = rosters.get(row.id) ?? []
+      const list = entrantPlayers.get(row.id) ?? []
       list.push({
         tag: row.display_tag ?? row.gamer_tag ?? row.name,
         slug: row.player_slug,
@@ -198,15 +198,14 @@ export default class EventsController {
             : null,
         provisional: row.provisional ?? false,
       })
-      rosters.set(row.id, list)
+      entrantPlayers.set(row.id, list)
     }
 
     const canManage = await bouncer.with(LeaguePolicy).allows('manage', league)
 
     /**
-     * Every player in the league, so a correction can point an account at any of
-     * them. Only sent to admins — it is the whole roster, and visitors have
-     * nothing to do with it.
+     * Every league player, so a correction can point an account at any of them.
+     * Only sent to admins — visitors have nothing to do with it.
      */
     const players = canManage
       ? await db
@@ -261,7 +260,7 @@ export default class EventsController {
           seed: row.seed,
           placement: row.placement,
           isDisqualified: row.is_disqualified,
-          players: rosters.get(row.id) ?? [],
+          players: entrantPlayers.get(row.id) ?? [],
         })),
       sets: sets.map((row) => ({
         id: row.id,

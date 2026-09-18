@@ -15,7 +15,7 @@ import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
 
 /**
- * The league's roster, and one player's record within it.
+ * The league's players, and one player's record within it.
  *
  * Both pages read a ranking's latest completed recompute rather than computing
  * anything, so they stay a handful of indexed reads.
@@ -26,7 +26,7 @@ export default class PlayersController {
 
     /**
      * Merged players are kept as tombstones so a merge stays reversible, but
-     * they are not people — the roster shows only live rows.
+     * they are not people — this list shows only live rows.
      */
     const players = await LeaguePlayer.query()
       .where('leagueId', league.id)
@@ -65,7 +65,7 @@ export default class PlayersController {
         })
         /**
          * Ranked players first in rank order, then everyone else by name. Sorting
-         * the whole roster alphabetically buries the standings among players who
+         * every player alphabetically buries the standings among players who
          * have no rated sets yet.
          */
         .sort((a, b) => {

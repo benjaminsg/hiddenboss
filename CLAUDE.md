@@ -256,7 +256,7 @@ platform never requires a migration.
   valid start.gg URL as unsupported. `ValidatingSink` rejects a second event, so the granularity is
   enforced rather than assumed.
 - **Identity resolution is scoped to the imported event.** Scoping it to the tournament pulled every
-  other event's field into the league's player roster.
+  other event's field into the league's players.
 - **An entrant is 1..N players.** Identity resolution joins entrant → participants → platform
   accounts → league players. Never map an entrant directly to a player; doubles and crews break.
 - **Ratings are derived, never patched in place.** Sets are the source of truth and a recompute

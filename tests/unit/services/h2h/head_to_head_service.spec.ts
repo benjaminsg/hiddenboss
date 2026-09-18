@@ -269,7 +269,7 @@ test.group('HeadToHeadService', (group) => {
     assert.equal(record!.aWins, 2)
     assert.equal(record!.bWins, 0)
 
-    // The tombstoned player no longer appears in the roster or matchups.
+    // The tombstoned player no longer appears in the player list or matchups.
     const { players } = await new HeadToHeadService().forLeague(league.id)
     assert.isFalse(players.some((player) => player.id === alice2))
   })
