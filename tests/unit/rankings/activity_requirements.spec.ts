@@ -1,6 +1,9 @@
 import { test } from '@japa/runner'
-import { meetsActivityRequirements } from '#lib/rankings/activity_requirements'
-import type { TournamentActivity } from '#lib/rankings/activity_requirements'
+import {
+  meetsActivityRequirements,
+  meetsResidencyRequirement,
+} from '#lib/rankings/activity_requirements'
+import type { PlayerLocation, TournamentActivity } from '#lib/rankings/activity_requirements'
 
 function activity(overrides: Partial<TournamentActivity> = {}): TournamentActivity {
   return {
@@ -166,5 +169,52 @@ test.group('meetsActivityRequirements', () => {
         { count: 1, minEntrants: null, location: { country: 'US' } },
       ])
     )
+  })
+})
+
+function player(overrides: Partial<PlayerLocation> = {}): PlayerLocation {
+  return { country: null, state: null, city: null, ...overrides }
+}
+
+test.group('meetsResidencyRequirement', () => {
+  test('an empty requirement list always passes, even for an unknown player', ({ assert }) => {
+    assert.isTrue(meetsResidencyRequirement(player(), []))
+  })
+
+  test('a single region passes or fails on every field given', ({ assert }) => {
+    const home = player({ country: 'US', state: 'WA', city: 'Spokane' })
+
+    assert.isTrue(meetsResidencyRequirement(home, [{ state: 'WA' }]))
+    assert.isFalse(meetsResidencyRequirement(home, [{ state: 'OR' }]))
+  })
+
+  test('a multi-field region requires every field in that entry to match', ({ assert }) => {
+    const home = player({ country: 'US', state: 'WA', city: 'Spokane' })
+
+    assert.isTrue(meetsResidencyRequirement(home, [{ country: 'US', state: 'WA' }]))
+    assert.isFalse(meetsResidencyRequirement(home, [{ country: 'US', state: 'CA' }]))
+  })
+
+  test('multiple alternative regions: matching any one qualifies', ({ assert }) => {
+    const home = player({ country: 'US', state: 'CA' })
+
+    assert.isTrue(
+      meetsResidencyRequirement(home, [{ state: 'WA' }, { state: 'CA' }, { state: 'OR' }])
+    )
+    assert.isFalse(meetsResidencyRequirement(home, [{ state: 'WA' }, { state: 'OR' }]))
+  })
+
+  test('matching is case- and whitespace-insensitive', ({ assert }) => {
+    const home = player({ city: 'Spokane' })
+
+    assert.isTrue(meetsResidencyRequirement(home, [{ city: ' spokane ' }]))
+  })
+
+  test('a player missing a field the matched requirement asks about never satisfies it', ({
+    assert,
+  }) => {
+    const home = player({ country: 'US', state: null })
+
+    assert.isFalse(meetsResidencyRequirement(home, [{ country: 'US', state: 'WA' }]))
   })
 })

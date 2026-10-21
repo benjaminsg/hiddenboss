@@ -486,6 +486,21 @@ export class PlatformAccountSchema extends BaseModel {
   declare weakIdentity: boolean
 }
 
+export class PlayerEventAttendanceSchema extends BaseModel {
+  static $columns = ['createdAt', 'eventId', 'id', 'leaguePlayerId', 'updatedAt'] as const
+  $columns = PlayerEventAttendanceSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare eventId: string
+  @column({ isPrimary: true })
+  declare id: string
+  @column()
+  declare leaguePlayerId: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
 export class QueueJobSchema extends BaseModel {
   static $columns = ['acquiredAt', 'data', 'dedupAt', 'dedupId', 'dedupTtl', 'error', 'executeAt', 'finishedAt', 'id', 'queue', 'score', 'status', 'workerId'] as const
   $columns = QueueJobSchema.$columns
@@ -548,6 +563,23 @@ export class QueueScheduleSchema extends BaseModel {
   declare timezone: string
   @column.dateTime()
   declare toDate: DateTime | null
+}
+
+export class RankingEligibilityOverrideSchema extends BaseModel {
+  static $columns = ['createdAt', 'id', 'kind', 'leaguePlayerId', 'rankingId', 'updatedAt'] as const
+  $columns = RankingEligibilityOverrideSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: string
+  @column()
+  declare kind: string
+  @column()
+  declare leaguePlayerId: string
+  @column()
+  declare rankingId: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
 }
 
 export class RankingRecomputeSchema extends BaseModel {
@@ -675,7 +707,7 @@ export class RankingTournamentStandingSchema extends BaseModel {
 }
 
 export class RankingSchema extends BaseModel {
-  static $columns = ['activityRequirements', 'algorithm', 'config', 'createdAt', 'description', 'dqPolicy', 'endsAt', 'id', 'latestRecomputeId', 'leagueId', 'name', 'published', 'recomputeMode', 'recomputeRequestedAt', 'requirements', 'slug', 'staleTournamentCount', 'startsAt', 'tournamentHashes', 'updatedAt'] as const
+  static $columns = ['activityRequirements', 'algorithm', 'config', 'createdAt', 'description', 'dqPolicy', 'endsAt', 'id', 'latestRecomputeId', 'leagueId', 'name', 'published', 'recomputeMode', 'recomputeRequestedAt', 'requirements', 'residencyRequirements', 'slug', 'staleTournamentCount', 'startsAt', 'tournamentHashes', 'updatedAt'] as const
   $columns = RankingSchema.$columns
   @column()
   declare activityRequirements: Record<string, any>
@@ -707,6 +739,8 @@ export class RankingSchema extends BaseModel {
   declare recomputeRequestedAt: DateTime | null
   @column()
   declare requirements: Record<string, any>
+  @column()
+  declare residencyRequirements: Record<string, any>
   @column()
   declare slug: string
   @column()

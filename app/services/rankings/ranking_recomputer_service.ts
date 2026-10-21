@@ -11,6 +11,7 @@ import { Elo } from '#lib/rankings/elo'
 import { Glicko2 } from '#lib/rankings/glicko2'
 import { OpenSkill } from '#lib/rankings/openskill'
 import { SetSelectionService } from './set_selection_service.js'
+import type { ManualAttendanceCredit } from './set_selection_service.js'
 import { DEFAULT_TIMEZONE } from '#lib/geo/timezones'
 import type { RatableSet, RankingAlgorithm, Standing } from '#lib/rankings/contracts'
 import type { TournamentActivity } from '#lib/rankings/activity_requirements'
@@ -152,7 +153,11 @@ export class RankingRecomputerService {
 
     const standings = algorithm.finalize(state)
     const lastPlayed = this.lastPlayedAt(sets)
-    const tournamentActivity = this.tournamentActivity(sets)
+    const manualAttendance = await this.selection.forManualAttendanceCredit(
+      ranking,
+      league.timezone ?? DEFAULT_TIMEZONE
+    )
+    const tournamentActivity = this.tournamentActivity(sets, manualAttendance)
 
     const created = await db.transaction(async (trx) => {
       recompute.useTransaction(trx)
@@ -480,7 +485,10 @@ export class RankingRecomputerService {
    * per side of one set: a set where a player's side was not the
    * DQ'd side counts as played even if the other side was.
    */
-  private tournamentActivity(sets: RatableSet[]): Map<string, TournamentActivity[]> {
+  private tournamentActivity(
+    sets: RatableSet[],
+    manualAttendance: ManualAttendanceCredit[] = []
+  ): Map<string, TournamentActivity[]> {
     const entrantCounts = new Map<string, number | null>()
     const locations = new Map<
       string,
@@ -526,6 +534,25 @@ export class RankingRecomputerService {
     for (const set of sets) {
       record(set.sideA, set.tournamentId, set.sideADisqualified)
       record(set.sideB, set.tournamentId, set.sideBDisqualified)
+    }
+
+    for (const credit of manualAttendance) {
+      if (!entrantCounts.has(credit.tournamentId)) {
+        entrantCounts.set(credit.tournamentId, credit.entrantCount)
+      }
+      if (!locations.has(credit.tournamentId)) {
+        locations.set(credit.tournamentId, {
+          country: credit.country,
+          state: credit.state,
+          city: credit.city,
+        })
+      }
+
+      const tournaments = perPlayer.get(credit.leaguePlayerId) ?? new Map<string, Accumulator>()
+      if (!tournaments.has(credit.tournamentId)) {
+        tournaments.set(credit.tournamentId, { setsPlayed: 0, timesDisqualified: 0 })
+        perPlayer.set(credit.leaguePlayerId, tournaments)
+      }
     }
 
     return new Map(

@@ -335,6 +335,10 @@ textarea[data-invalid='true'] {
   font-size: 14px;
   color: var(--gray-7);
 }
+
+.requirement-row {
+  margin-bottom: 8px;
+}
 input[data-invalid='true'] + div,
 textarea[data-invalid='true'] + div {
   color: #fb2c36;

@@ -5,7 +5,11 @@ import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import { withUuid } from '#models/mixins/with_uuid'
 import League from '#models/league'
 import RankingRecompute from '#models/ranking_recompute'
-import type { ActivityRequirement, DqPolicy } from '#lib/rankings/activity_requirements'
+import type {
+  ActivityRequirement,
+  DqPolicy,
+  LocationFilter,
+} from '#lib/rankings/activity_requirements'
 
 export default class Ranking extends compose(RankingSchema, withUuid) {
   /**
@@ -18,6 +22,9 @@ export default class Ranking extends compose(RankingSchema, withUuid) {
 
   @column()
   declare dqPolicy: DqPolicy
+
+  @column({ prepare: (value: LocationFilter[]) => JSON.stringify(value) })
+  declare residencyRequirements: LocationFilter[]
 
   @belongsTo(() => League)
   declare league: BelongsTo<typeof League>

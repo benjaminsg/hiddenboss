@@ -1,11 +1,18 @@
 import Ranking from '#models/ranking'
 import RankingRecompute from '#models/ranking_recompute'
 import RankingStanding from '#models/ranking_standing'
+import RankingEligibilityOverride from '#models/ranking_eligibility_override'
+import LeaguePlayer from '#models/league_player'
 import RecomputeRankingJob from '#jobs/recompute_ranking_job'
 import LeaguePolicy from '#policies/league_policy'
 import { StalenessService } from '#services/rankings/staleness_service'
 import { createRankingValidator, updateRankingValidator } from '#validators/ranking'
-import { DEFAULT_DQ_POLICY, meetsActivityRequirements } from '#lib/rankings/activity_requirements'
+import { addEligibilityOverrideValidator } from '#validators/ranking_eligibility_override'
+import {
+  DEFAULT_DQ_POLICY,
+  meetsActivityRequirements,
+  meetsResidencyRequirement,
+} from '#lib/rankings/activity_requirements'
 import type {
   ActivityRequirement,
   DqPolicy,
@@ -66,6 +73,14 @@ function normaliseActivityRequirements(
   }))
 }
 
+function normaliseResidencyRequirements(
+  requirements: Array<{ country?: string; state?: string; city?: string }> | undefined
+): LocationFilter[] {
+  return (requirements ?? [])
+    .map((requirement) => normaliseLocation(requirement))
+    .filter((requirement): requirement is LocationFilter => requirement !== null)
+}
+
 export default class RankingsController {
   /** Every ranking in the league, public. */
   async index({ league, bouncer, inertia }: HttpContext) {
@@ -113,9 +128,36 @@ export default class RankingsController {
 
     const requirements = activityRequirementsOf(ranking)
     const dqPolicy = (ranking.dqPolicy ?? DEFAULT_DQ_POLICY) as DqPolicy
-    const inactive = (standing: RankingStanding) =>
+    const residencyRequirements = (ranking.residencyRequirements ?? []) as LocationFilter[]
+
+    const overrideRows = await RankingEligibilityOverride.query().where('rankingId', ranking.id)
+    const overrides = new Map(
+      overrideRows.map((override) => [override.leaguePlayerId, override.kind])
+    )
+
+    /**
+     * `inactive` — too few counted tournaments.
+     * `ineligible` — wrong home region, or manual exclusion.
+     */
+    const failsActivity = (standing: RankingStanding) =>
       requirements.length > 0 &&
       !meetsActivityRequirements(standing.tournamentActivity ?? [], requirements, dqPolicy)
+
+    const failsResidency = (standing: RankingStanding) =>
+      residencyRequirements.length > 0 &&
+      !meetsResidencyRequirement(standing.leaguePlayer, residencyRequirements)
+
+    const overrideOf = (standing: RankingStanding) => overrides.get(standing.leaguePlayerId) ?? null
+
+    const inactive = (standing: RankingStanding) =>
+      overrideOf(standing) !== 'exempt' && failsActivity(standing)
+
+    const ineligible = (standing: RankingStanding) => {
+      const override = overrideOf(standing)
+      if (override === 'exempt') return false
+      if (override === 'exclude') return true
+      return failsResidency(standing)
+    }
 
     return inertia.render('leagues/ranking', {
       league: { slug: league.slug, name: league.name },
@@ -131,6 +173,7 @@ export default class RankingsController {
         endsAt: ranking.endsAt?.toISODate() ?? null,
         activityRequirements: requirements,
         dqPolicy,
+        residencyRequirements,
         /**
          * A worker is replaying this ranking right now.
          */
@@ -155,6 +198,8 @@ export default class RankingsController {
         setsPlayed: standing.setsPlayed,
         eventsCounted: standing.eventsCounted,
         inactive: inactive(standing),
+        ineligible: ineligible(standing),
+        eligibilityOverride: overrideOf(standing),
       })),
     })
   }
@@ -178,6 +223,7 @@ export default class RankingsController {
       endsAt: payload.endsAt ?? null,
       activityRequirements: normaliseActivityRequirements(payload.activityRequirements),
       dqPolicy: payload.dqPolicy ?? DEFAULT_DQ_POLICY,
+      residencyRequirements: normaliseResidencyRequirements(payload.residencyRequirements),
       published: true,
     })
 
@@ -205,6 +251,18 @@ export default class RankingsController {
       })
     }
 
+    const [overrides, leaguePlayers] = await Promise.all([
+      RankingEligibilityOverride.query()
+        .where('rankingId', ranking.id)
+        .preload('leaguePlayer')
+        .orderBy('createdAt'),
+      LeaguePlayer.query()
+        .where('leagueId', league.id)
+        .whereNull('mergedIntoId')
+        .select('id', 'displayTag')
+        .orderBy('displayTag'),
+    ])
+
     return inertia.render('leagues/ranking_edit', {
       league: { slug: league.slug, name: league.name },
       ranking: {
@@ -214,7 +272,14 @@ export default class RankingsController {
         endsAt: ranking.endsAt?.toISODate() ?? null,
         activityRequirements: activityRequirementsOf(ranking),
         dqPolicy: (ranking.dqPolicy ?? DEFAULT_DQ_POLICY) as DqPolicy,
+        residencyRequirements: (ranking.residencyRequirements ?? []) as LocationFilter[],
       },
+      eligibilityOverrides: overrides.map((override) => ({
+        id: override.id,
+        player: override.leaguePlayer.displayTag,
+        kind: override.kind,
+      })),
+      players: leaguePlayers.map((player) => ({ id: player.id, displayTag: player.displayTag })),
     })
   }
 
@@ -245,6 +310,7 @@ export default class RankingsController {
       endsAt: payload.endsAt ?? null,
       activityRequirements: newActivityRequirements,
       dqPolicy: payload.dqPolicy ?? DEFAULT_DQ_POLICY,
+      residencyRequirements: normaliseResidencyRequirements(payload.residencyRequirements),
     })
     await ranking.save()
 
@@ -279,5 +345,69 @@ export default class RankingsController {
     return response
       .redirect()
       .toRoute('rankings.show', { league: league.slug, ranking: ranking.slug })
+  }
+
+  async addEligibilityOverride({ league, params, request, response, session }: HttpContext) {
+    const ranking = await Ranking.query()
+      .where('leagueId', league.id)
+      .where('slug', params.ranking)
+      .firstOrFail()
+
+    const payload = await request.validateUsing(addEligibilityOverrideValidator)
+
+    const player = await LeaguePlayer.query()
+      .where('id', payload.leaguePlayerId)
+      .where('leagueId', league.id)
+      .first()
+
+    if (!player) {
+      return response.notFound({ message: 'No such player' })
+    }
+
+    const existing = await RankingEligibilityOverride.query()
+      .where('rankingId', ranking.id)
+      .where('leaguePlayerId', player.id)
+      .first()
+
+    if (existing) {
+      session.flash('error', `${player.displayTag} already has an eligibility override.`)
+      return response.redirect().back()
+    }
+
+    await RankingEligibilityOverride.create({
+      rankingId: ranking.id,
+      leaguePlayerId: player.id,
+      kind: payload.kind,
+    })
+
+    session.flash(
+      'success',
+      payload.kind === 'exempt'
+        ? `Exempted ${player.displayTag}.`
+        : `Excluded ${player.displayTag}.`
+    )
+
+    return response.redirect().back()
+  }
+
+  async removeEligibilityOverride({ league, params, response, session }: HttpContext) {
+    const ranking = await Ranking.query()
+      .where('leagueId', league.id)
+      .where('slug', params.ranking)
+      .firstOrFail()
+
+    const override = await RankingEligibilityOverride.query()
+      .where('id', params.override)
+      .where('rankingId', ranking.id)
+      .first()
+
+    if (!override) {
+      return response.notFound({ message: 'No such override' })
+    }
+
+    await override.delete()
+    session.flash('success', 'Override removed.')
+
+    return response.redirect().back()
   }
 }

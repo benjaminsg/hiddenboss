@@ -162,7 +162,7 @@ export class IdentityCorrectionService {
         displayTag: wanted.newPlayerTag,
         /**
          * No global player. The global tier takes confirmed evidence only, and an
-         * admin splitting a league roster has not asserted anything about who
+         * admin splitting a league player has not asserted anything about who
          * this is instance-wide.
          */
         globalPlayerId: null,

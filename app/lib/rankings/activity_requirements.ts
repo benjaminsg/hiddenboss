@@ -4,14 +4,10 @@
  * counted, never against a recompute.
  */
 
-/**
- * A location constraint: country/state/city, all of which must match if set.
- */
-export interface LocationFilter {
-  country?: string
-  state?: string
-  city?: string
-}
+import { matchesAnyRegion, matchesLocation } from '#lib/geo/region_filter'
+import type { LocationFilter } from '#lib/geo/region_filter'
+
+export type { LocationFilter } from '#lib/geo/region_filter'
 
 /**
  * One clause: at least `count` qualifying tournaments. `minEntrants: null`
@@ -72,25 +68,23 @@ function qualifiesUnderDqPolicy(activity: TournamentActivity, dqPolicy: DqPolicy
   }
 }
 
-function normalise(value: string): string {
-  return value.trim().toLowerCase()
+/** A league player's own home location. */
+export interface PlayerLocation {
+  country?: string | null
+  state?: string | null
+  city?: string | null
 }
 
-function fieldMatches(actual: string | null | undefined, expected: string | undefined): boolean {
-  if (!expected) return true
-  if (actual === null || actual === undefined) return false
-  return normalise(actual) === normalise(expected)
+export function meetsResidencyRequirement(
+  player: PlayerLocation,
+  requirements: LocationFilter[]
+): boolean {
+  return matchesAnyRegion(player, requirements)
 }
 
-function matchesLocation(activity: TournamentActivity, location: LocationFilter | null): boolean {
-  if (!location) return true
+export type EligibilityOverrideKind = 'exempt' | 'exclude'
 
-  return (
-    fieldMatches(activity.country, location.country) &&
-    fieldMatches(activity.state, location.state) &&
-    fieldMatches(activity.city, location.city)
-  )
-}
+export const ELIGIBILITY_OVERRIDE_KINDS: EligibilityOverrideKind[] = ['exempt', 'exclude']
 
 function qualifyingCount(
   tournamentActivity: TournamentActivity[],

@@ -2,6 +2,7 @@ import type React from 'react'
 import { Form } from '@adonisjs/inertia/react'
 import LeagueNav from '../../components/league_nav.js'
 import ActivityRequirementsEditor from '../../components/activity_requirements_editor.js'
+import ResidencyRequirementsEditor from '../../components/residency_requirements_editor.js'
 
 type Props = {
   league: { slug: string; name: string }
@@ -81,6 +82,8 @@ const CreateRanking: React.FC<Props> = ({ league }) => {
               <small>Only matters if activity requirements are set above.</small>
               {errors.dqPolicy && <p role="alert">{errors.dqPolicy}</p>}
             </div>
+
+            <ResidencyRequirementsEditor league={league.slug} initial={[]} errors={errors} />
 
             <button type="submit" disabled={processing}>
               Create ranking

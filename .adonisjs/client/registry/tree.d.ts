@@ -40,6 +40,10 @@ export interface ApiDefinition {
     edit: typeof routes['rankings.edit']
     update: typeof routes['rankings.update']
     recompute: typeof routes['rankings.recompute']
+    eligibilityOverrides: {
+      store: typeof routes['rankings.eligibilityOverrides.store']
+      destroy: typeof routes['rankings.eligibilityOverrides.destroy']
+    }
     index: typeof routes['rankings.index']
     show: typeof routes['rankings.show']
   }
@@ -51,11 +55,18 @@ export interface ApiDefinition {
       store: typeof routes['players.merge.store']
     }
     update: typeof routes['players.update']
+    attendance: {
+      store: typeof routes['players.attendance.store']
+      destroy: typeof routes['players.attendance.destroy']
+    }
     index: typeof routes['players.index']
     show: typeof routes['players.show']
   }
   events: {
     destroy: typeof routes['events.destroy']
+    tournament: {
+      destroy: typeof routes['events.tournament.destroy']
+    }
     update: typeof routes['events.update']
     index: typeof routes['events.index']
     show: typeof routes['events.show']

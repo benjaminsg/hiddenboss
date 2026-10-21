@@ -125,7 +125,7 @@ const Players: React.FC<Props> = ({ league, canManage, ranking, players }) => {
     state: stateFilter || undefined,
   })
 
-  // A custom roster: semicolon-separated tags matched case-insensitively against
+  // A custom set of league players: semicolon-separated tags matched case-insensitively against
   // the exact display tag, same rule the rankings page uses. A term that matches
   // nobody is reported back rather than silently dropped.
   const searchTerms = search

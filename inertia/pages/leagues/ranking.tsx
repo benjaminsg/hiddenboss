@@ -33,6 +33,7 @@ type Props = {
     endsAt: string | null
     activityRequirements: Array<{ count: number; minEntrants: number | null }>
     dqPolicy: 'exclude_no_shows' | 'exclude_double_dq' | 'exclude_any_dq'
+    residencyRequirements: Array<{ country?: string; state?: string; city?: string }>
   }
   standings: Array<{
     rank: number
@@ -48,6 +49,8 @@ type Props = {
     setsPlayed: number
     eventsCounted: number
     inactive: boolean
+    ineligible: boolean
+    eligibilityOverride: 'exempt' | 'exclude' | null
   }>
 }
 
@@ -167,7 +170,9 @@ const RankingPage: React.FC<Props> = ({ league, canManage, ranking, standings })
     locationFieldMatches(standing.city, cityFilter)
 
   const filtered = (
-    excludeInactive ? standings.filter((standing) => !standing.inactive) : standings
+    excludeInactive
+      ? standings.filter((standing) => !standing.inactive && !standing.ineligible)
+      : standings
   ).filter(matchesRegion)
 
   const searched = isSearching
@@ -240,7 +245,10 @@ const RankingPage: React.FC<Props> = ({ league, canManage, ranking, standings })
 
       <h1>{ranking.name}</h1>
 
-      {(ranking.startsAt || ranking.endsAt || ranking.activityRequirements.length > 0) && (
+      {(ranking.startsAt ||
+        ranking.endsAt ||
+        ranking.activityRequirements.length > 0 ||
+        ranking.residencyRequirements.length > 0) && (
         <p>
           {ranking.startsAt || ranking.endsAt
             ? `Counts events from ${ranking.startsAt ?? 'the start'} to ${ranking.endsAt ?? 'now'}.`
@@ -257,6 +265,16 @@ const RankingPage: React.FC<Props> = ({ league, canManage, ranking, standings })
                 .join(', and ')}
               {DQ_POLICY_LABEL[ranking.dqPolicy]}
               {' — otherwise they are flagged inactive.'}
+            </>
+          )}
+          {ranking.residencyRequirements.length > 0 && (
+            <>
+              {' '}
+              Players must live in{' '}
+              {ranking.residencyRequirements
+                .map((region) => formatLocation(region) ?? 'an unspecified region')
+                .join(', or ')}
+              {' — otherwise they are flagged ineligible.'}
             </>
           )}
         </p>
@@ -364,7 +382,7 @@ const RankingPage: React.FC<Props> = ({ league, canManage, ranking, standings })
             checked={excludeInactive}
             onChange={(event) => changeExcludeInactive(event.target.checked)}
           />
-          Exclude inactive players
+          Exclude inactive or ineligible players
         </label>
       </p>
 
@@ -406,6 +424,9 @@ const RankingPage: React.FC<Props> = ({ league, canManage, ranking, standings })
                       {standing.player}
                     </Link>
                     {standing.inactive && ' · inactive'}
+                    {standing.ineligible && ' · ineligible'}
+                    {standing.eligibilityOverride === 'exempt' && ' · exempt'}
+                    {standing.eligibilityOverride === 'exclude' && ' · excluded by admin'}
                   </td>
                   <td>{formatLocation(standing) ?? '—'}</td>
                   <td>{standing.rating}</td>

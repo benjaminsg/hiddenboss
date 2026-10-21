@@ -5,8 +5,8 @@ import LeagueNav from '../../components/league_nav.js'
 import PlayerLinkList from '../../components/player_link_list.js'
 import RankingHistoryChart from '../../components/ranking_history_chart.js'
 import type { HistoryPoint } from '../../components/ranking_history_chart.js'
-import LocationAutocompleteInput from '../../components/location_autocomplete_input.js'
-import { useLocationSuggestions } from '../../hooks/use_location_suggestions.js'
+import LocationFields from '../../components/location_fields.js'
+import EntityAutocompleteField from '../../components/entity_autocomplete_field.js'
 import { formatLocation } from '../../lib/format_location.js'
 
 type Props = {
@@ -22,6 +22,9 @@ type Props = {
     country: string | null
   }
   ranking: { slug: string; name: string } | null
+  eligibilityOverride: { id: string; kind: 'exempt' | 'exclude' } | null
+  attendanceCredits: Array<{ id: string; label: string; startAt: string | null }>
+  events: Array<{ id: string; label: string }>
   standing: {
     rank: number
     rating: number
@@ -73,10 +76,6 @@ type PlayerEditFormProps = {
   country: string | null
 }
 
-/**
- * Own component, not inlined below: it needs `useLocationSuggestions` state
- * per field, which only makes sense attached to a stable component instance.
- */
 const PlayerEditForm: React.FC<PlayerEditFormProps> = ({
   league,
   player,
@@ -85,19 +84,6 @@ const PlayerEditForm: React.FC<PlayerEditFormProps> = ({
   state,
   country,
 }) => {
-  const [cityValue, setCityValue] = useState(city ?? '')
-  const [stateValue, setStateValue] = useState(state ?? '')
-  const [countryValue, setCountryValue] = useState(country ?? '')
-
-  const citySuggestions = useLocationSuggestions(league, 'city', cityValue, {
-    country: countryValue || undefined,
-    state: stateValue || undefined,
-  })
-  const stateSuggestions = useLocationSuggestions(league, 'state', stateValue, {
-    country: countryValue || undefined,
-  })
-  const countrySuggestions = useLocationSuggestions(league, 'country', countryValue)
-
   return (
     <Form route="players.update" routeParams={{ league, player }}>
       {({ errors, processing }) => (
@@ -107,42 +93,7 @@ const PlayerEditForm: React.FC<PlayerEditFormProps> = ({
           </label>
           <label>
             Location
-            <div className="location-fields">
-              <LocationAutocompleteInput
-                name="city"
-                ariaLabel="City"
-                placeholder="city"
-                value={cityValue}
-                suggestions={citySuggestions}
-                onChange={setCityValue}
-                onSelect={(suggestion) => {
-                  setCityValue(suggestion.city ?? suggestion.label)
-                  if (suggestion.state) setStateValue(suggestion.state)
-                  if (suggestion.country) setCountryValue(suggestion.country)
-                }}
-              />
-              <LocationAutocompleteInput
-                name="state"
-                ariaLabel="State or province"
-                placeholder="state/province"
-                value={stateValue}
-                suggestions={stateSuggestions}
-                onChange={setStateValue}
-                onSelect={(suggestion) => {
-                  setStateValue(suggestion.state ?? suggestion.label)
-                  if (suggestion.country) setCountryValue(suggestion.country)
-                }}
-              />
-              <LocationAutocompleteInput
-                name="country"
-                ariaLabel="Country"
-                placeholder="country"
-                value={countryValue}
-                suggestions={countrySuggestions}
-                onChange={setCountryValue}
-                onSelect={(suggestion) => setCountryValue(suggestion.country ?? suggestion.label)}
-              />
-            </div>
+            <LocationFields league={league} city={city} state={state} country={country} />
           </label>
           <button type="submit" disabled={processing}>
             Save
@@ -154,6 +105,150 @@ const PlayerEditForm: React.FC<PlayerEditFormProps> = ({
         </>
       )}
     </Form>
+  )
+}
+
+const PlayerEligibilityOverride: React.FC<{
+  league: string
+  playerId: string
+  rankingSlug: string
+  rankingName: string
+  canManage: boolean
+  override: Props['eligibilityOverride']
+}> = ({ league, playerId, rankingSlug, rankingName, canManage, override }) => {
+  return (
+    <>
+      <h2>Eligibility</h2>
+      <p>
+        {override === null && `No manual override — eligibility follows ${rankingName}'s rules.`}
+        {override?.kind === 'exempt' && `Exempt — always eligible for ${rankingName}.`}
+        {override?.kind === 'exclude' && `Excluded — never eligible for ${rankingName}.`}
+      </p>
+
+      {canManage && override && (
+        <Form
+          route="rankings.eligibilityOverrides.destroy"
+          routeParams={{ league, ranking: rankingSlug, override: override.id }}
+        >
+          {({ processing }) => (
+            <button type="submit" disabled={processing}>
+              Remove override
+            </button>
+          )}
+        </Form>
+      )}
+
+      {canManage && !override && (
+        <Form
+          route="rankings.eligibilityOverrides.store"
+          routeParams={{ league, ranking: rankingSlug }}
+        >
+          {({ errors, processing }) => (
+            <>
+              <input type="hidden" name="leaguePlayerId" value={playerId} />
+              <select name="kind" defaultValue="exempt" aria-label="Override type">
+                <option value="exempt">Exempt — always eligible</option>
+                <option value="exclude">Exclude — never eligible</option>
+              </select>{' '}
+              <button type="submit" disabled={processing}>
+                Add override
+              </button>
+              {errors.leaguePlayerId && <p role="alert">{errors.leaguePlayerId}</p>}
+            </>
+          )}
+        </Form>
+      )}
+    </>
+  )
+}
+
+const AddAttendanceForm: React.FC<{
+  league: string
+  playerSlug: string
+  events: Props['events']
+}> = ({ league, playerSlug, events }) => {
+  const [fieldKey, setFieldKey] = useState(0)
+  const [selectedId, setSelectedId] = useState('')
+
+  return (
+    <Form
+      route="players.attendance.store"
+      routeParams={{ league, player: playerSlug }}
+      resetOnSuccess
+      onSuccess={() => {
+        setFieldKey((key) => key + 1)
+        setSelectedId('')
+      }}
+    >
+      {({ errors, processing }) => (
+        <>
+          <EntityAutocompleteField
+            key={fieldKey}
+            name="eventId"
+            items={events}
+            label={(event) => event.label}
+            ariaLabel="Event"
+            placeholder="Event…"
+            onSelectionChange={setSelectedId}
+          />{' '}
+          <button type="submit" disabled={processing || selectedId === ''}>
+            Add
+          </button>
+          {errors.eventId && <p role="alert">{errors.eventId}</p>}
+        </>
+      )}
+    </Form>
+  )
+}
+
+/**
+ * League-wide
+ */
+const AttendanceCredits: React.FC<{
+  league: string
+  playerSlug: string
+  canManage: boolean
+  credits: Props['attendanceCredits']
+  events: Props['events']
+}> = ({ league, playerSlug, canManage, credits, events }) => {
+  return (
+    <>
+      <h2>Attendance credit</h2>
+      <p>
+        Manually credit this player with attending an event even though none of their matches were
+        recorded — counts toward activity requirements in every ranking in this league.
+      </p>
+
+      {credits.length === 0 ? (
+        <p>No manually credited events.</p>
+      ) : (
+        <ul>
+          {credits.map((credit) => (
+            <li key={credit.id}>
+              {credit.label}
+              {credit.startAt && ` (${credit.startAt})`}
+              {canManage && (
+                <>
+                  {' '}
+                  <Form
+                    route="players.attendance.destroy"
+                    routeParams={{ league, player: playerSlug, eventAttendance: credit.id }}
+                  >
+                    {({ processing }) => (
+                      <button type="submit" disabled={processing}>
+                        Remove
+                      </button>
+                    )}
+                  </Form>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canManage && <AddAttendanceForm league={league} playerSlug={playerSlug} events={events} />}
+    </>
   )
 }
 
@@ -234,6 +329,9 @@ const PlayerProfile: React.FC<Props> = ({
   canManage,
   player,
   ranking,
+  eligibilityOverride,
+  attendanceCredits,
+  events,
   standing,
   history,
   matches,
@@ -335,6 +433,25 @@ const PlayerProfile: React.FC<Props> = ({
             </tbody>
           </table>
         </div>
+      )}
+
+      <AttendanceCredits
+        league={league.slug}
+        playerSlug={player.slug}
+        canManage={canManage}
+        credits={attendanceCredits}
+        events={events}
+      />
+
+      {ranking && (
+        <PlayerEligibilityOverride
+          league={league.slug}
+          playerId={player.id}
+          rankingSlug={ranking.slug}
+          rankingName={ranking.name}
+          canManage={canManage}
+          override={eligibilityOverride}
+        />
       )}
 
       <h2>Accounts ({accounts.length})</h2>
