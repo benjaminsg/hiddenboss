@@ -29,15 +29,34 @@ type Props = {
   }>
 }
 
+const POLL_INTERVAL_MS = 2000
+const DEFAULT_MAX_POLLS = 45
+
+/**
+ * Scale budget by number of brackets.
+ */
+function maxPollsFor(runningImports: Props['imports']): number {
+  const bracketsTotal = Math.max(0, ...runningImports.map((record) => record.bracketsTotal ?? 0))
+  if (bracketsTotal === 0) return DEFAULT_MAX_POLLS
+
+  const budgetMs = Math.max(DEFAULT_MAX_POLLS * POLL_INTERVAL_MS, 60_000 + bracketsTotal * 4_000)
+  return Math.ceil(budgetMs / POLL_INTERVAL_MS)
+}
+
 const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
   /**
    * The worker writes progress as it goes, so a queued or running import means
    * this page is already out of date.
    */
-  const running = imports.some((record) =>
+  const runningImports = imports.filter((record) =>
     ['queued', 'running', 'cancelling'].includes(record.status)
   )
-  const { gaveUp } = useLiveUpdates(running, { only: ['imports'] })
+  const running = runningImports.length > 0
+  const { gaveUp } = useLiveUpdates(running, {
+    only: ['imports'],
+    intervalMs: POLL_INTERVAL_MS,
+    maxPolls: maxPollsFor(runningImports),
+  })
 
   return (
     <>
