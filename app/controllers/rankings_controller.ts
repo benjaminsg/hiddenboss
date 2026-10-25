@@ -18,6 +18,7 @@ import type {
   DqPolicy,
   LocationFilter,
 } from '#lib/rankings/activity_requirements'
+import { normaliseLocation, normaliseLocations } from '#lib/geo/region_filter'
 import type { HttpContext } from '@adonisjs/core/http'
 
 /** A stored requirement, read back with `location` normalised to an explicit `null` for the page props — never `undefined`, even for a clause saved before this field existed. */
@@ -34,21 +35,6 @@ function activityRequirementsOf(ranking: Ranking): NormalisedActivityRequirement
     minEntrants: requirement.minEntrants,
     location: requirement.location ?? null,
   }))
-}
-
-/** Collapses an all-empty location row to `null`. */
-function normaliseLocation(
-  location: { country?: string; state?: string; city?: string } | undefined
-): LocationFilter | null {
-  if (!location) return null
-
-  const country = location.country?.trim() || undefined
-  const state = location.state?.trim() || undefined
-  const city = location.city?.trim() || undefined
-
-  if (!country && !state && !city) return null
-
-  return { country, state, city }
 }
 
 function hasLocationRequirement(requirements: ActivityRequirement[]): boolean {
@@ -71,14 +57,6 @@ function normaliseActivityRequirements(
     minEntrants: requirement.minEntrants ?? null,
     location: normaliseLocation(requirement.location),
   }))
-}
-
-function normaliseResidencyRequirements(
-  requirements: Array<{ country?: string; state?: string; city?: string }> | undefined
-): LocationFilter[] {
-  return (requirements ?? [])
-    .map((requirement) => normaliseLocation(requirement))
-    .filter((requirement): requirement is LocationFilter => requirement !== null)
 }
 
 export default class RankingsController {
@@ -223,7 +201,7 @@ export default class RankingsController {
       endsAt: payload.endsAt ?? null,
       activityRequirements: normaliseActivityRequirements(payload.activityRequirements),
       dqPolicy: payload.dqPolicy ?? DEFAULT_DQ_POLICY,
-      residencyRequirements: normaliseResidencyRequirements(payload.residencyRequirements),
+      residencyRequirements: normaliseLocations(payload.residencyRequirements),
       published: true,
     })
 
@@ -310,7 +288,7 @@ export default class RankingsController {
       endsAt: payload.endsAt ?? null,
       activityRequirements: newActivityRequirements,
       dqPolicy: payload.dqPolicy ?? DEFAULT_DQ_POLICY,
-      residencyRequirements: normaliseResidencyRequirements(payload.residencyRequirements),
+      residencyRequirements: normaliseLocations(payload.residencyRequirements),
     })
     await ranking.save()
 

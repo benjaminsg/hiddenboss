@@ -11,6 +11,24 @@ export interface LocationFilter {
   city?: string
 }
 
+export function normaliseLocation(location: LocationFilter | undefined): LocationFilter | null {
+  if (!location) return null
+
+  const country = location.country?.trim() || undefined
+  const state = location.state?.trim() || undefined
+  const city = location.city?.trim() || undefined
+
+  if (!country && !state && !city) return null
+
+  return { country, state, city }
+}
+
+export function normaliseLocations(locations: LocationFilter[] | undefined): LocationFilter[] {
+  return (locations ?? [])
+    .map((location) => normaliseLocation(location))
+    .filter((location): location is LocationFilter => location !== null)
+}
+
 interface LocatedFields {
   country?: string | null
   state?: string | null

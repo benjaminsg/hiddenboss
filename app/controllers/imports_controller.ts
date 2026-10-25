@@ -2,34 +2,9 @@ import EventImport from '#models/event_import'
 import ImportEventJob from '#jobs/import_event_job'
 import { platforms } from '#lib/platforms/registry'
 import { importValidator } from '#validators/import'
+import { normaliseLocations } from '#lib/geo/region_filter'
 import type { LocationFilter } from '#lib/geo/region_filter'
 import type { HttpContext } from '@adonisjs/core/http'
-
-/** Collapses an all-empty region row to `null`. */
-function normaliseLocation(
-  location: { country?: string; state?: string; city?: string } | undefined
-): LocationFilter | null {
-  if (!location) return null
-
-  const country = location.country?.trim() || undefined
-  const state = location.state?.trim() || undefined
-  const city = location.city?.trim() || undefined
-
-  if (!country && !state && !city) return null
-
-  return { country, state, city }
-}
-
-/**
- * Drops any all-blank row.
- */
-function normaliseRegionFilter(
-  regions: Array<{ country?: string; state?: string; city?: string }> | undefined
-): LocationFilter[] {
-  return (regions ?? [])
-    .map((region) => normaliseLocation(region))
-    .filter((region): region is LocationFilter => region !== null)
-}
 
 function regionFilterTag(regions: LocationFilter[]): string | null {
   if (regions.length === 0) return null
@@ -115,7 +90,7 @@ export default class ImportsController {
       targetUrl: url,
       status: 'queued',
       createdByUserId: auth.getUserOrFail().id,
-      regionFilter: normaliseRegionFilter(regionFilter),
+      regionFilter: normaliseLocations(regionFilter),
     })
 
     await ImportEventJob.dispatch({ eventImportId: eventImport.id })
