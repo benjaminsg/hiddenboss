@@ -15,6 +15,7 @@ import { ValidatingSink } from '#lib/platforms/validating_sink'
 import { RegionFilteringSink } from '#lib/platforms/region_filtering_sink'
 import { regionsEqual } from '#lib/geo/region_filter'
 import { EventRegionReconcilerService } from '#services/imports/event_region_reconciler_service'
+import { DEFAULT_SIZE_LIMITS, SizeLimitingSink } from '#lib/platforms/size_limiting_sink'
 import { TournamentWriterService } from '#services/imports/tournament_writer_service'
 import type { ImportSink, PlatformAdapter, PlatformFetch, EventRef } from '#lib/platforms/contracts'
 
@@ -314,7 +315,13 @@ export class EventImporterService {
      * rather than writing rows that are quietly wrong. Every adapter gets this,
      * including one nobody wrote a test for.
      */
-    const sink = new ValidatingSink(adapter.key, observing)
+    const validating = new ValidatingSink(adapter.key, observing)
+
+    /**
+     * Outermost, so an oversized event is rejected before `ValidatingSink` or
+     * anything behind it does any work, not just before the writer does.
+     */
+    const sink = new SizeLimitingSink(adapter.key, DEFAULT_SIZE_LIMITS, validating)
 
     try {
       await adapter.fetchEvent(ref, { credentials, http, signal, logger }, sink)
