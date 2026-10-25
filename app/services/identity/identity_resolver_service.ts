@@ -19,6 +19,13 @@ export interface ResolveResult {
   mapped: number
   created: number
   reused: number
+  /** Dropped by the league filter, not a contract violation. */
+  skipped: number
+}
+
+interface LeagueEventFilters {
+  regionFilter: LocationFilter[]
+  leagueFilter: boolean
 }
 
 /** How a mapping was arrived at, kept so the review queue can rank them later. */
@@ -42,15 +49,24 @@ interface Match {
  * An unmatched account becomes its own league player. Two rows for one person
  * is a merge away from correct; one row for two people has already lost
  * information.
+ *
+ * A league filter changes only the last step: no match means nothing to
+ * import rather than a new player. There is deliberately no "eligible
+ * players only" filter here — ranking eligibility (activity, residency,
+ * overrides) is a read-time concept everywhere else in this system, and an
+ * account already linked from a past import would skip it anyway by
+ * reaching the "already mapped" step first, which is what made the earlier
+ * eligible-only import option quietly do nothing for anyone but a brand-new
+ * match. See League View's "only eligible players" filter instead.
  */
 export class IdentityResolverService {
   async run({ leagueId, eventId }: ResolveRequest): Promise<ResolveResult> {
-    const regionFilter = await this.regionFilterFor(leagueId, eventId)
-    const accounts = await this.accountsIn(eventId, regionFilter)
-    const result: ResolveResult = { mapped: 0, created: 0, reused: 0 }
+    const filters = await this.filtersFor(leagueId, eventId)
+    const accounts = await this.accountsIn(eventId, filters.regionFilter)
+    const result: ResolveResult = { mapped: 0, created: 0, reused: 0, skipped: 0 }
 
     if (accounts.length > 0) {
-      await this.resolve(leagueId, accounts, result)
+      await this.resolve(leagueId, accounts, filters.leagueFilter, result)
     }
 
     /**
@@ -67,6 +83,7 @@ export class IdentityResolverService {
   private async resolve(
     leagueId: string,
     accounts: PlatformAccount[],
+    leagueFilter: boolean,
     result: ResolveResult
   ): Promise<void> {
     await db.transaction(async (trx) => {
@@ -85,20 +102,27 @@ export class IdentityResolverService {
           (await this.viaGlobalPlayer(trx, leagueId, account)) ??
           (await this.viaExactTag(trx, leagueId, account))
 
-        if (match) {
-          await this.link(trx, leagueId, account, match)
-          result.mapped += 1
+        if (!match) {
+          // A league filter admits only accounts matching a player already in
+          // the league, so nobody new is created under it.
+          if (leagueFilter) {
+            result.skipped += 1
+            continue
+          }
+
+          const player = await this.createPlayer(trx, leagueId, account)
+          await this.link(trx, leagueId, account, {
+            leaguePlayerId: player.id,
+            confidence: 1,
+            source: 'auto',
+            provisional: false,
+          })
+          result.created += 1
           continue
         }
 
-        const player = await this.createPlayer(trx, leagueId, account)
-        await this.link(trx, leagueId, account, {
-          leaguePlayerId: player.id,
-          confidence: 1,
-          source: 'auto',
-          provisional: false,
-        })
-        result.created += 1
+        await this.link(trx, leagueId, account, match)
+        result.mapped += 1
       }
 
       /**
@@ -111,15 +135,18 @@ export class IdentityResolverService {
     })
   }
 
-  private async regionFilterFor(leagueId: string, eventId: string): Promise<LocationFilter[]> {
+  private async filtersFor(leagueId: string, eventId: string): Promise<LeagueEventFilters> {
     const row = await db
       .from('league_events')
       .where('league_id', leagueId)
       .where('event_id', eventId)
-      .select('region_filter')
+      .select('region_filter', 'league_filter')
       .first()
 
-    return parseRegionFilter(row?.region_filter)
+    return {
+      regionFilter: parseRegionFilter(row?.region_filter),
+      leagueFilter: row?.league_filter ?? false,
+    }
   }
 
   /**

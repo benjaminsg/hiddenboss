@@ -333,7 +333,11 @@ export class EventImporterService {
        */
       await LeagueEvent.updateOrCreate(
         { leagueId: eventImport.leagueId, eventId },
-        { addedByUserId: eventImport.createdByUserId, regionFilter: eventImport.regionFilter },
+        {
+          addedByUserId: eventImport.createdByUserId,
+          regionFilter: eventImport.regionFilter,
+          leagueFilter: eventImport.leagueFilter,
+        },
         { client: trx }
       )
     })

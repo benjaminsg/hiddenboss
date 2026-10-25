@@ -16,6 +16,18 @@ function regionFilterTag(regions: LocationFilter[]): string | null {
   return `${regionNames.join(' / ')} Filtered`
 }
 
+/** One tag per active filter. */
+function importTags(record: EventImport): string[] {
+  const tags: string[] = []
+
+  const regionTag = regionFilterTag(record.regionFilter)
+  if (regionTag) tags.push(regionTag)
+
+  if (record.leagueFilter) tags.push('League Only')
+
+  return tags
+}
+
 /**
  * Starting and monitoring imports.
  *
@@ -43,12 +55,12 @@ export default class ImportsController {
           ? `${record.tournament?.name ?? ''} — ${record.event.name}`.replace(/^ — /, '')
           : (record.tournament?.name ?? record.targetUrl ?? 'Pending')
 
-        const tag = regionFilterTag(record.regionFilter)
+        const tags = importTags(record)
 
         return {
           id: record.id,
           platformKey: record.platformKey,
-          label: tag ? `${baseLabel} [${tag}]` : baseLabel,
+          label: tags.length > 0 ? `${baseLabel} [${tags.join(', ')}]` : baseLabel,
           /**
            * Only linkable once the import has actually succeeded
            */
@@ -60,7 +72,7 @@ export default class ImportsController {
           bracketsTotal: record.bracketsTotal,
           error: record.error,
           warning: record.emptyWarning,
-          regionFiltered: tag !== null,
+          regionFiltered: regionFilterTag(record.regionFilter) !== null,
           counts: record.stats as {
             entrants?: number
             sets?: number
@@ -78,7 +90,7 @@ export default class ImportsController {
    * the adapter, which can say which events it holds.
    */
   async store({ league, auth, request, response, session }: HttpContext) {
-    const { url, regionFilter } = await request.validateUsing(importValidator)
+    const { url, regionFilter, leagueFilter } = await request.validateUsing(importValidator)
 
     const resolved = platforms.resolveUrl(url)
     if (!resolved) {
@@ -93,6 +105,7 @@ export default class ImportsController {
       status: 'queued',
       createdByUserId: auth.getUserOrFail().id,
       regionFilter: normaliseLocations(regionFilter),
+      leagueFilter: leagueFilter ?? false,
     })
 
     await ImportEventJob.dispatch({ eventImportId: eventImport.id })

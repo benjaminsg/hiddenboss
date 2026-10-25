@@ -1,4 +1,5 @@
 import type React from 'react'
+import { useState } from 'react'
 import { Form, Link } from '@adonisjs/inertia/react'
 import LeagueNav from '../../components/league_nav.js'
 import ResidencyRequirementsEditor from '../../components/residency_requirements_editor.js'
@@ -45,6 +46,8 @@ function maxPollsFor(runningImports: Props['imports']): number {
 }
 
 const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
+  const [leagueFilter, setLeagueFilter] = useState(false)
+
   /**
    * The worker writes progress as it goes, so a queued or running import means
    * this page is already out of date.
@@ -109,6 +112,18 @@ const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
                 addButtonText="+ Add region"
               />
             </details>
+
+            <p>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  name="leagueFilter"
+                  checked={leagueFilter}
+                  onChange={(event) => setLeagueFilter(event.target.checked)}
+                />
+                League players only — match existing players instead of adding new ones
+              </label>
+            </p>
 
             <button type="submit" disabled={processing}>
               Import

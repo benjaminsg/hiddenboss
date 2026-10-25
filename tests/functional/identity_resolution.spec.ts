@@ -287,3 +287,74 @@ Bob,NY,US
     )
   })
 })
+
+/**
+ * A league filter admits only accounts matching a player already in the
+ * league — the last resolution step (creating a new player) is what it
+ * skips, not matching itself, so someone already in the league under a
+ * different account still joins the right player rather than a new one.
+ */
+test.group('identity resolution with a league filter', (group) => {
+  group.each.setup(() => testUtils.db().truncate())
+
+  async function league(slug: string) {
+    return League.create({ slug, name: slug })
+  }
+
+  async function importManual(
+    target: League,
+    payload: Record<string, unknown>,
+    options: { leagueFilter?: boolean } = {}
+  ) {
+    const eventImport = await EventImport.create({
+      leagueId: target.id,
+      platformKey: 'manual',
+      status: 'queued',
+      payload,
+      leagueFilter: options.leagueFilter ?? false,
+    })
+
+    return new EventImporterService().run({ eventImportId: eventImport.id })
+  }
+
+  test('matches an existing player by tag, but creates nobody new', async ({ assert }) => {
+    const target = await league('league-filter')
+
+    const first = await importManual(target, {
+      name: 'Weekly 1',
+      slug: 'league-filter-week-1',
+      entrants: 'name\nAlice\n',
+    })
+    await new IdentityResolverService().run({ leagueId: target.id, eventId: first.eventId! })
+    const afterFirst = await LeaguePlayer.query().where('leagueId', target.id)
+    assert.sameMembers(
+      afterFirst.map((p) => p.displayTag),
+      ['Alice']
+    )
+
+    const second = await importManual(
+      target,
+      { name: 'Weekly 2', slug: 'league-filter-week-2', entrants: 'name\nAlice\nBob\n' },
+      { leagueFilter: true }
+    )
+    const result = await new IdentityResolverService().run({
+      leagueId: target.id,
+      eventId: second.eventId!,
+    })
+
+    assert.equal(result.mapped, 1)
+    assert.equal(result.created, 0)
+    assert.equal(result.skipped, 1)
+
+    // Still only Alice — Bob matched nobody and the league filter admits no
+    // one new.
+    const players = await LeaguePlayer.query().where('leagueId', target.id)
+    assert.sameMembers(
+      players.map((player) => player.displayTag),
+      ['Alice']
+    )
+
+    const linkedAccounts = await LeaguePlayerAccount.query().where('leagueId', target.id)
+    assert.lengthOf(linkedAccounts, 2)
+  })
+})
