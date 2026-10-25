@@ -1,5 +1,5 @@
 import type React from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Form, Link } from '@adonisjs/inertia/react'
 import LeagueNav from '../../components/league_nav.js'
 import PlayerLinkList from '../../components/player_link_list.js'
@@ -8,10 +8,18 @@ import LocationFields from '../../components/location_fields.js'
 import { formatLocation } from '../../lib/format_location.js'
 import { confirmSubmit } from '../../lib/confirm_submit.js'
 
+/** Reads the page's own query string for the initial view state. */
+function initialQueryParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  return new URLSearchParams(window.location.search)
+}
+
 type Props = {
   league: { slug: string; name: string }
   canManage: boolean
   tournamentSharedWithOtherLeagues: boolean
+  /** Null when the league has no ranking yet. */
+  rankingName: string | null
   event: {
     id: string
     name: string
@@ -34,6 +42,8 @@ type Props = {
     seed: number | null
     placement: number | null
     isDisqualified: boolean
+    eligible: boolean
+    rankingEligible: boolean
     players: Array<{
       tag: string
       slug: string | null
@@ -55,6 +65,10 @@ type Props = {
     scoreB: number | null
     disqualifiedA: boolean
     disqualifiedB: boolean
+    eligibleA: boolean
+    eligibleB: boolean
+    rankingEligibleA: boolean
+    rankingEligibleB: boolean
     winnerIsA: boolean
     decided: boolean
     state: string
@@ -247,11 +261,47 @@ const EventResults: React.FC<Props> = ({
   league,
   canManage,
   tournamentSharedWithOtherLeagues,
+  rankingName,
   event,
   players,
   entrants,
   sets,
 }) => {
+  const [leagueView, setLeagueView] = useState(() => initialQueryParams().get('view') !== 'full')
+  const [onlyEligible, setOnlyEligible] = useState(
+    () => leagueView && initialQueryParams().get('onlyEligible') === '1'
+  )
+
+  const changeLeagueView = (checked: boolean) => {
+    setLeagueView(checked)
+    if (!checked) setOnlyEligible(false)
+  }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+
+    if (leagueView) params.delete('view')
+    else params.set('view', 'full')
+
+    if (leagueView && onlyEligible) params.set('onlyEligible', '1')
+    else params.delete('onlyEligible')
+
+    const query = params.toString()
+    const url = `${window.location.pathname}${query ? `?${query}` : ''}`
+    window.history.replaceState(window.history.state, '', url)
+  }, [leagueView, onlyEligible])
+
+  const entrantShown = (entrant: Props['entrants'][number]) =>
+    entrant.eligible && (!onlyEligible || entrant.rankingEligible)
+  const setShown = (set: Props['sets'][number]) =>
+    (set.eligibleA && (!onlyEligible || set.rankingEligibleA)) ||
+    (set.eligibleB && (!onlyEligible || set.rankingEligibleB))
+
+  const shownEntrants = leagueView ? entrants.filter(entrantShown) : entrants
+  const shownSets = leagueView ? sets.filter(setShown) : sets
+  const hiddenEntrants = entrants.length - shownEntrants.length
+  const hiddenSets = sets.length - shownSets.length
+
   return (
     <>
       <LeagueNav slug={league.slug} name={league.name} canManage={canManage} />
@@ -273,6 +323,37 @@ const EventResults: React.FC<Props> = ({
           </>
         )}
       </p>
+
+      <p>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={leagueView}
+            onChange={(changed) => changeLeagueView(changed.target.checked)}
+          />
+          League view — only players {league.name} counts, and their sets
+        </label>
+        {rankingName && (
+          <>
+            <br />
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={onlyEligible}
+                disabled={!leagueView}
+                onChange={(changed) => setOnlyEligible(changed.target.checked)}
+              />
+              Only eligible players — under {rankingName}
+            </label>
+          </>
+        )}
+      </p>
+      {leagueView && (hiddenEntrants > 0 || hiddenSets > 0) && (
+        <p>
+          Hiding {hiddenEntrants} filtered entrant{hiddenEntrants === 1 ? '' : 's'} and {hiddenSets}{' '}
+          filtered set{hiddenSets === 1 ? '' : 's'}
+        </p>
+      )}
 
       {canManage && (
         <details className="edit-panel">
@@ -346,7 +427,10 @@ const EventResults: React.FC<Props> = ({
         </details>
       )}
 
-      <h2>Placements ({entrants.length})</h2>
+      <h2>Placements ({shownEntrants.length})</h2>
+      {leagueView && shownEntrants.length === 0 && (
+        <p>None of this event&apos;s entrants resolve to a player {league.name} counts.</p>
+      )}
       <div className="table-scroll">
         <table>
           <thead>
@@ -358,7 +442,7 @@ const EventResults: React.FC<Props> = ({
             </tr>
           </thead>
           <tbody>
-            {entrants.map((entrant) => (
+            {shownEntrants.map((entrant) => (
               <tr key={entrant.id}>
                 <td>
                   {entrant.isDisqualified && 'DQ '}
@@ -387,16 +471,23 @@ const EventResults: React.FC<Props> = ({
           <p>
             Each imported account is mapped to one league player. Two rows for one person is a merge
             away from correct, so fix it here — an account moves rather than being deleted, and the
-            change is logged.
+            change is logged.{' '}
+            {leagueView
+              ? "Limited to league view's own entrants — an entrant the region filter excludes has no account to reassign here. Switch to full view to hand one of them to this league anyway."
+              : 'Showing every entrant, including ones the region filter would otherwise exclude — reassigning one of their accounts here admits them to this league regardless.'}
           </p>
 
-          <IdentityTable leagueSlug={league.slug} players={players} entrants={entrants} />
+          <IdentityTable leagueSlug={league.slug} players={players} entrants={shownEntrants} />
         </>
       )}
 
-      <h2>Sets ({sets.length})</h2>
-      {sets.length === 0 ? (
-        <p>No sets recorded. An event that has not been played yet looks like this.</p>
+      <h2>Sets ({shownSets.length})</h2>
+      {shownSets.length === 0 ? (
+        <p>
+          {sets.length === 0
+            ? 'No sets recorded. An event that has not been played yet looks like this.'
+            : `No sets with a player ${league.name} counts in them.`}
+        </p>
       ) : (
         <div className="table-scroll">
           <table>
@@ -410,7 +501,7 @@ const EventResults: React.FC<Props> = ({
               </tr>
             </thead>
             <tbody>
-              {sets.map((set) => (
+              {shownSets.map((set) => (
                 <tr key={set.id}>
                   <td>{set.round ?? '—'}</td>
                   <td>{set.decided ? (set.winnerIsA ? set.entrantA : set.entrantB) : '—'}</td>

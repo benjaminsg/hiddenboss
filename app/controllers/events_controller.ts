@@ -5,6 +5,9 @@ import LeaguePolicy from '#policies/league_policy'
 import RecomputeRankingJob from '#jobs/recompute_ranking_job'
 import { StalenessService } from '#services/rankings/staleness_service'
 import { LeaguePlayerReconcilerService } from '#services/identity/league_player_reconciler_service'
+import { LeagueEventEligibilityService } from '#services/leagues/league_event_eligibility_service'
+import { DefaultRankingService } from '#services/rankings/default_ranking_service'
+import { RankingPlayerEligibilityService } from '#services/rankings/ranking_player_eligibility_service'
 import { updateEventValidator } from '#validators/event'
 import { DEFAULT_TIMEZONE } from '#lib/geo/timezones'
 import { fromLocalDate, toLocalDate } from '#lib/time/local_date'
@@ -122,6 +125,7 @@ export default class EventsController {
         'en.seed',
         'en.placement',
         'en.is_disqualified',
+        'lp.id as league_player_id',
         'lp.slug as player_slug',
         'lp.display_tag',
         'pa.id as platform_account_id',
@@ -152,6 +156,7 @@ export default class EventsController {
         's.entrant_b_disqualified',
         's.winner_entrant_id',
         's.entrant_a_id',
+        's.entrant_b_id',
         's.completed_at',
         'ea.name as entrant_a_name',
         'eb.name as entrant_b_name',
@@ -176,6 +181,8 @@ export default class EventsController {
       }>
     >()
 
+    const entrantPlayerIds = new Map<string, string[]>()
+
     for (const row of entrants) {
       const list = entrantPlayers.get(row.id) ?? []
       list.push({
@@ -199,6 +206,37 @@ export default class EventsController {
         provisional: row.provisional ?? false,
       })
       entrantPlayers.set(row.id, list)
+
+      if (row.league_player_id) {
+        const ids = entrantPlayerIds.get(row.id) ?? []
+        if (!ids.includes(row.league_player_id)) ids.push(row.league_player_id)
+        entrantPlayerIds.set(row.id, ids)
+      }
+    }
+
+    /**
+     * League view
+     */
+    const eligibleEntrants = await new LeagueEventEligibilityService().eligibleEntrantIds(
+      league.id,
+      event.id
+    )
+
+    /**
+     * League view eligible players-only filter.
+     */
+    const ranking = await new DefaultRankingService().resolve(league.id)
+    const rankingEligiblePlayers = ranking
+      ? await new RankingPlayerEligibilityService().eligiblePlayerIds(ranking, [
+          ...new Set([...entrantPlayerIds.values()].flat()),
+        ])
+      : null
+
+    /** A doubles/crew entrant is only as eligible as its least eligible player. */
+    const entrantRankingEligible = (entrantId: string): boolean => {
+      if (!rankingEligiblePlayers) return true
+      const ids = entrantPlayerIds.get(entrantId)
+      return !ids || ids.length === 0 || ids.every((id) => rankingEligiblePlayers.has(id))
     }
 
     const canManage = await bouncer.with(LeaguePolicy).allows('manage', league)
@@ -236,6 +274,7 @@ export default class EventsController {
       league: { slug: league.slug, name: league.name },
       canManage,
       tournamentSharedWithOtherLeagues: otherLeague !== null,
+      rankingName: ranking?.name ?? null,
       players: players.map((row) => ({ id: row.id, displayTag: row.display_tag })),
       event: {
         id: event.id,
@@ -260,6 +299,8 @@ export default class EventsController {
           seed: row.seed,
           placement: row.placement,
           isDisqualified: row.is_disqualified,
+          eligible: eligibleEntrants.has(row.id),
+          rankingEligible: entrantRankingEligible(row.id),
           players: entrantPlayers.get(row.id) ?? [],
         })),
       sets: sets.map((row) => ({
@@ -273,6 +314,10 @@ export default class EventsController {
         scoreB: row.score_b,
         disqualifiedA: row.entrant_a_disqualified,
         disqualifiedB: row.entrant_b_disqualified,
+        eligibleA: eligibleEntrants.has(row.entrant_a_id),
+        eligibleB: eligibleEntrants.has(row.entrant_b_id),
+        rankingEligibleA: row.entrant_a_id !== null && entrantRankingEligible(row.entrant_a_id),
+        rankingEligibleB: row.entrant_b_id !== null && entrantRankingEligible(row.entrant_b_id),
         winnerIsA: row.winner_entrant_id !== null && row.winner_entrant_id === row.entrant_a_id,
         decided: row.winner_entrant_id !== null,
         state: row.state,
