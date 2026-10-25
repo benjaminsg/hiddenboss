@@ -5,6 +5,9 @@ import LeaguePlayerAccount from '#models/league_player_account'
 import PlatformAccount from '#models/platform_account'
 import { PlayerSlugService } from '#services/identity/player_slug_service'
 import { LeaguePlayerReconcilerService } from '#services/identity/league_player_reconciler_service'
+import { EntrantRegionService } from '#services/identity/entrant_region_service'
+import { parseRegionFilter } from '#lib/geo/region_filter'
+import type { LocationFilter } from '#lib/geo/region_filter'
 import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 
 export interface ResolveRequest {
@@ -42,7 +45,8 @@ interface Match {
  */
 export class IdentityResolverService {
   async run({ leagueId, eventId }: ResolveRequest): Promise<ResolveResult> {
-    const accounts = await this.accountsIn(eventId)
+    const regionFilter = await this.regionFilterFor(leagueId, eventId)
+    const accounts = await this.accountsIn(eventId, regionFilter)
     const result: ResolveResult = { mapped: 0, created: 0, reused: 0 }
 
     if (accounts.length > 0) {
@@ -50,9 +54,10 @@ export class IdentityResolverService {
     }
 
     /**
-     * A re-import under a tighter region filter writes the new region's
-     * entrants without removing the old ones, so the previous region's
-     * players have to be pruned after resolution rather than during it.
+     * A re-import under a tighter region filter resolves the new region's
+     * entrants without touching the previous ones already mapped, so the
+     * ones that no longer qualify have to be pruned after resolution rather
+     * than during it.
      */
     await new LeaguePlayerReconcilerService().pruneUnbackedPlayers({ leagueId, actorUserId: null })
 
@@ -106,23 +111,49 @@ export class IdentityResolverService {
     })
   }
 
+  private async regionFilterFor(leagueId: string, eventId: string): Promise<LocationFilter[]> {
+    const row = await db
+      .from('league_events')
+      .where('league_id', leagueId)
+      .where('event_id', eventId)
+      .select('region_filter')
+      .first()
+
+    return parseRegionFilter(row?.region_filter)
+  }
+
   /**
-   * Every platform account that competed in this event.
+   * Platform accounts this league resolves into players: every account that
+   * competed in the event, narrowed to the entrants this league's region
+   * filter admits.
    *
-   * Scoped to the event rather than its tournament, so a league that imports the
-   * singles bracket does not acquire the doubles field as league players.
+   * Scoped to the event rather than its tournament, so a league that imports
+   * the singles bracket does not acquire the doubles field as league players.
+   * The event itself is always imported in full regardless of the filter —
+   * only which of its entrants become this league's players is restricted
+   * here.
    */
-  private async accountsIn(eventId: string): Promise<PlatformAccount[]> {
-    return PlatformAccount.query()
-      .whereIn(
-        'id',
-        db
-          .from('entrant_participants')
-          .select('entrant_participants.platform_account_id')
-          .innerJoin('entrants', 'entrants.id', 'entrant_participants.entrant_id')
-          .where('entrants.event_id', eventId)
+  private async accountsIn(
+    eventId: string,
+    regionFilter: LocationFilter[]
+  ): Promise<PlatformAccount[]> {
+    const participants = db
+      .from('entrant_participants')
+      .select('entrant_participants.platform_account_id')
+      .innerJoin('entrants', 'entrants.id', 'entrant_participants.entrant_id')
+      .where('entrants.event_id', eventId)
+
+    if (regionFilter.length > 0) {
+      const qualifying = await new EntrantRegionService().qualifyingEntrantIds(
+        eventId,
+        regionFilter
       )
-      .orderBy('gamerTag')
+      if (qualifying.size === 0) return []
+
+      participants.whereIn('entrant_participants.entrant_id', [...qualifying])
+    }
+
+    return PlatformAccount.query().whereIn('id', participants).orderBy('gamerTag')
   }
 
   /**

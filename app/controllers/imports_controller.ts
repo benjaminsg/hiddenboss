@@ -60,10 +60,12 @@ export default class ImportsController {
           bracketsTotal: record.bracketsTotal,
           error: record.error,
           warning: record.emptyWarning,
+          regionFiltered: tag !== null,
           counts: record.stats as {
             entrants?: number
             sets?: number
-            regionFilteredOutSets?: number
+            entrantsImported?: number
+            setsImported?: number
           } | null,
         }
       }),

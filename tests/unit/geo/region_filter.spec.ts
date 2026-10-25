@@ -1,10 +1,5 @@
 import { test } from '@japa/runner'
-import {
-  entrantMatchesRegions,
-  matchesAnyRegion,
-  matchesLocation,
-  regionsEqual,
-} from '#lib/geo/region_filter'
+import { entrantMatchesRegions, matchesAnyRegion, matchesLocation } from '#lib/geo/region_filter'
 
 test.group('matchesLocation', () => {
   test('null requirement imposes no restriction', ({ assert }) => {
@@ -82,30 +77,5 @@ test.group('entrantMatchesRegions', () => {
     assert.isTrue(
       entrantMatchesRegions([{ country: 'United States', state: 'Washington', city: null }], wa)
     )
-  })
-})
-
-test.group('regionsEqual', () => {
-  test('two empty lists are equal', ({ assert }) => {
-    assert.isTrue(regionsEqual([], []))
-  })
-
-  test('the same regions in a different order are equal', ({ assert }) => {
-    assert.isTrue(
-      regionsEqual([{ state: 'WA' }, { state: 'OR' }], [{ state: 'OR' }, { state: 'WA' }])
-    )
-  })
-
-  test('matching is case- and whitespace-insensitive', ({ assert }) => {
-    assert.isTrue(regionsEqual([{ state: 'WA' }], [{ state: ' wa ' }]))
-  })
-
-  test('a different set of regions is not equal', ({ assert }) => {
-    assert.isFalse(regionsEqual([{ state: 'WA' }], [{ state: 'WA' }, { state: 'OR' }]))
-    assert.isFalse(regionsEqual([{ state: 'WA' }], [{ state: 'OR' }]))
-  })
-
-  test('an empty list is never equal to a non-empty one', ({ assert }) => {
-    assert.isFalse(regionsEqual([], [{ state: 'WA' }]))
   })
 })

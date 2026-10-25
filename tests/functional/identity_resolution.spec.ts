@@ -1,5 +1,6 @@
 import { test } from '@japa/runner'
 import testUtils from '@adonisjs/core/services/test_utils'
+import Entrant from '#models/entrant'
 import EventImport from '#models/event_import'
 import League from '#models/league'
 import LeagueCredential from '#models/league_credential'
@@ -11,6 +12,7 @@ import { fixtureHttp, hasFixtures } from '../unit/platforms/fixture_http.js'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { LocationFilter } from '#lib/geo/region_filter'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../fixtures/platforms/', import.meta.url))
 const recorded = await hasFixtures('startgg')
@@ -196,4 +198,92 @@ test.group('identity resolution', (group) => {
     assert.equal(players.length, mappings.length)
     assert.isAbove(players.length, 0)
   }).skip(!recorded, 'no start.gg fixtures recorded yet')
+})
+
+/**
+ * A region-filtered import always writes the whole event now — the filter
+ * instead gates which of its entrants this league resolves into players.
+ * See `IdentityResolverService.accountsIn`.
+ */
+test.group('identity resolution with a region filter', (group) => {
+  group.each.setup(() => testUtils.db().truncate())
+
+  async function league(slug: string) {
+    return League.create({ slug, name: slug })
+  }
+
+  async function importManualFiltered(
+    target: League,
+    payload: Record<string, unknown>,
+    regionFilter: LocationFilter[]
+  ) {
+    const eventImport = await EventImport.create({
+      leagueId: target.id,
+      platformKey: 'manual',
+      status: 'queued',
+      payload,
+      regionFilter,
+    })
+
+    return new EventImporterService().run({ eventImportId: eventImport.id })
+  }
+
+  const REGIONAL_ENTRANTS = `name,state,country
+Alice,CA,US
+Bob,NY,US
+`
+
+  test('writes every entrant, but resolves only the ones the filter admits', async ({ assert }) => {
+    const target = await league('identity-region')
+    const finished = await importManualFiltered(
+      target,
+      { name: 'Weekly', slug: 'identity-region-week', entrants: REGIONAL_ENTRANTS },
+      [{ state: 'CA' }]
+    )
+
+    assert.equal(finished.status, 'ok')
+    const entrants = await Entrant.query().where('eventId', finished.eventId!)
+    assert.sameMembers(
+      entrants.map((entrant) => entrant.name),
+      ['Alice', 'Bob']
+    )
+
+    await new IdentityResolverService().run({ leagueId: target.id, eventId: finished.eventId! })
+
+    const players = await LeaguePlayer.query().where('leagueId', target.id)
+    assert.deepEqual(
+      players.map((player) => player.displayTag),
+      ['Alice']
+    )
+  })
+
+  test('re-resolving under a widened filter admits the previously-excluded entrant too', async ({
+    assert,
+  }) => {
+    const target = await league('identity-region-widen')
+    const first = await importManualFiltered(
+      target,
+      { name: 'Weekly', slug: 'identity-region-widen-week', entrants: REGIONAL_ENTRANTS },
+      [{ state: 'CA' }]
+    )
+    await new IdentityResolverService().run({ leagueId: target.id, eventId: first.eventId! })
+    const afterFirst = await LeaguePlayer.query().where('leagueId', target.id)
+    assert.deepEqual(
+      afterFirst.map((player) => player.displayTag),
+      ['Alice']
+    )
+
+    const second = await importManualFiltered(
+      target,
+      { name: 'Weekly', slug: 'identity-region-widen-week', entrants: REGIONAL_ENTRANTS },
+      []
+    )
+    await new IdentityResolverService().run({ leagueId: target.id, eventId: second.eventId! })
+
+    const afterSecond = await LeaguePlayer.query().where('leagueId', target.id)
+    assert.sameMembers(
+      afterSecond.map((player) => player.displayTag),
+      ['Alice', 'Bob']
+    )
+  })
 })

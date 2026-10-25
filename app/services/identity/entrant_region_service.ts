@@ -1,5 +1,25 @@
 import db from '@adonisjs/lucid/services/db'
-import type { RegionLocation } from '#lib/geo/region_filter'
+import { entrantMatchesRegions } from '#lib/geo/region_filter'
+import type { LocationFilter, RegionLocation } from '#lib/geo/region_filter'
+
+function groupByEntrant(
+  rows: Array<{
+    entrant_id: string
+    country: string | null
+    state: string | null
+    city: string | null
+  }>
+): Map<string, RegionLocation[]> {
+  const map = new Map<string, RegionLocation[]>()
+
+  for (const row of rows) {
+    const list = map.get(row.entrant_id) ?? []
+    list.push({ country: row.country, state: row.state, city: row.city })
+    map.set(row.entrant_id, list)
+  }
+
+  return map
+}
 
 /**
  * The location half of `entrantSides`, shared by the read-time region filter
@@ -28,14 +48,35 @@ export class EntrantRegionService {
         'league_players.city'
       )
 
-    const map = new Map<string, RegionLocation[]>()
+    return groupByEntrant(rows)
+  }
 
-    for (const row of rows) {
-      const list = map.get(row.entrant_id) ?? []
-      list.push({ country: row.country, state: row.state, city: row.city })
-      map.set(row.entrant_id, list)
-    }
+  /**
+   * Entrants of `eventId` whose participants, by their own platform account's
+   * reported location, all satisfy `regions` — before any league player
+   * exists to read a location from.
+   *
+   * Used by identity resolution to decide which entrants are admitted to a
+   * league at all when its import was region-filtered, and by the importer
+   * to report how many were not.
+   */
+  async qualifyingEntrantIds(eventId: string, regions: LocationFilter[]): Promise<Set<string>> {
+    const entrantRows = await db.from('entrants').where('event_id', eventId).select('id')
+    const entrantIds = entrantRows.map((row) => row.id as string)
 
-    return map
+    if (entrantIds.length === 0) return new Set()
+    if (regions.length === 0) return new Set(entrantIds)
+
+    const locationRows = await db
+      .from('entrant_participants as ep')
+      .innerJoin('platform_accounts as pa', 'pa.id', 'ep.platform_account_id')
+      .whereIn('ep.entrant_id', entrantIds)
+      .select('ep.entrant_id', 'pa.country', 'pa.state', 'pa.city')
+
+    const byEntrant = groupByEntrant(locationRows)
+
+    return new Set(
+      entrantIds.filter((id) => entrantMatchesRegions(byEntrant.get(id) ?? [], regions))
+    )
   }
 }

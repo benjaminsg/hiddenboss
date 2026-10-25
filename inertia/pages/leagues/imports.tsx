@@ -20,11 +20,12 @@ type Props = {
     bracketsTotal: number | null
     error: string | null
     warning: string | null
+    regionFiltered: boolean
     counts: {
       entrants?: number
       sets?: number
-      regionFilteredOutSets?: number
-      regionFilteredOutEntrants?: number
+      entrantsImported?: number
+      setsImported?: number
     } | null
   }>
 }
@@ -185,11 +186,10 @@ const Imports: React.FC<Props> = ({ league, platforms, imports }) => {
                       <>
                         <br />
                         {record.counts.entrants ?? 0} entrants, {record.counts.sets} sets
-                        {/* Distinguishes "a region filter excluded most of this bracket" from "the bracket was just small." */}
-                        {Boolean(record.counts.regionFilteredOutEntrants) &&
-                          `, ${record.counts.regionFilteredOutEntrants} entrants excluded by region filter`}
-                        {Boolean(record.counts.regionFilteredOutSets) &&
-                          `, ${record.counts.regionFilteredOutSets} sets excluded by region filter`}
+                        {record.regionFiltered &&
+                          typeof record.counts.entrantsImported === 'number' &&
+                          typeof record.counts.setsImported === 'number' &&
+                          `, ${record.counts.entrantsImported} entrants and ${record.counts.setsImported} sets imported`}
                       </>
                     )}
                   </td>

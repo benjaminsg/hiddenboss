@@ -333,8 +333,9 @@ test.group('import pipeline', (group) => {
   /**
    * Alice (CA) beats Bob (no reported location) — the base fixture's only
    * set, carrying its character-selection data — and also beats a third
-   * entrant, Carol (also CA), added here. A `state: 'CA'` filter should keep
-   * only Alice-vs-Carol.
+   * entrant, Carol (also CA), added here. A `state: 'CA'` filter admits only
+   * Alice and Carol as this league's players; the event itself is always
+   * written in full regardless of the filter.
    */
   class RegionalFixture extends FakePlatformAdapter {
     protected override entrants(): CanonicalEntrant[] {
@@ -391,7 +392,7 @@ test.group('import pipeline', (group) => {
     }
   }
 
-  test('a region filter keeps only entrants from those regions, and the sets between them', async ({
+  test('a region filter admits only matching entrants as this league’s players; the event is still imported in full', async ({
     assert,
   }) => {
     platforms.unregister('fake')
@@ -402,53 +403,96 @@ test.group('import pipeline', (group) => {
 
     assert.equal(finished.status, 'ok')
 
-    const sets = await TournamentSet.all()
-    assert.lengthOf(sets, 1)
-    assert.equal(sets[0].externalId, 's2')
-
-    // Bob (no reported location) is never written at all, not merely
-    // excluded from sets — only Alice and Carol, both CA, qualify.
+    // Nothing about the event is dropped at import time any more — Bob (no
+    // reported location) is written just like Alice and Carol.
     const entrants = await Entrant.all()
-    assert.lengthOf(entrants, 2)
+    assert.lengthOf(entrants, 3)
     assert.sameMembers(
       entrants.map((entrant) => entrant.name),
-      ['Alice', 'Carol']
+      ['Alice', 'Bob', 'Carol']
     )
-    assert.lengthOf(await PlatformAccount.all(), 2)
+    assert.lengthOf(await TournamentSet.all(), 2)
+    assert.lengthOf(await PlatformAccount.all(), 3)
+
+    // The filter instead gates identity resolution: only the CA entrants
+    // become this league's players.
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: finished.eventId! })
+    assert.sameMembers(await leaguePlayerTags(league), ['Alice', 'Carol'])
   })
 
-  test('capabilities reflect the raw import, even when the set carrying them was filtered out', async ({
+  test('stats report how much of the event the filter admits, not the raw totals', async ({
     assert,
   }) => {
     platforms.unregister('fake')
     platforms.register(new RegionalFixture())
 
     const league = await seedLeague()
-    // Alice-vs-Bob — the set with character selections — is excluded (Bob
-    // has no reported location), leaving zero written sets with games.
+    const finished = await startImport(league, [{ state: 'CA' }])
+
+    // Alice and Carol (both CA) are admitted; Bob (no reported location) is
+    // not, and neither is Alice-vs-Bob, since Bob is one of its two sides.
+    assert.deepInclude(finished.stats, {
+      entrants: 3,
+      sets: 2,
+      entrantsImported: 2,
+      setsImported: 1,
+    })
+  })
+
+  test('stats report every entrant and set as imported when there is no filter', async ({
+    assert,
+  }) => {
+    const league = await seedLeague()
+    const finished = await startImport(league)
+
+    assert.deepInclude(finished.stats, {
+      entrants: 2,
+      sets: 1,
+      entrantsImported: 2,
+      setsImported: 1,
+    })
+  })
+
+  test('capabilities reflect the whole import, regardless of the league’s region filter', async ({
+    assert,
+  }) => {
+    platforms.unregister('fake')
+    platforms.register(new RegionalFixture())
+
+    const league = await seedLeague()
+    // Alice-vs-Bob carries the character-selection data; a region filter no
+    // longer keeps it from being written.
     const finished = await startImport(league, [{ city: 'San Francisco' }])
 
-    assert.lengthOf(await SetGame.all(), 0)
-    assert.lengthOf(await SetGameSelection.all(), 0)
+    assert.lengthOf(await SetGame.all(), 1)
+    assert.lengthOf(await SetGameSelection.all(), 2)
 
     const tournament = await Tournament.findOrFail(finished.tournamentId!)
     assert.isTrue(tournament.capabilities.characterSelections)
   })
 
-  test('a filtered import of an event already counted unfiltered is rejected', async ({
+  test('an event already counted under one filter can be re-imported under a different one', async ({
     assert,
   }) => {
     const league = await seedLeague()
-    await startImport(league)
+    const first = await startImport(league)
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: first.eventId! })
+    assert.sameMembers(await leaguePlayerTags(league), ['Alice', 'Bob'])
 
-    await assert.rejects(
-      () => startImport(league, [{ state: 'CA' }]),
-      /already counted by this league under a different/
-    )
+    const second = await startImport(league, [{ state: 'CA' }])
+    assert.equal(second.status, 'ok')
 
-    // Nothing about the existing unfiltered link changed.
     const link = await LeagueEvent.query().where('leagueId', league.id).firstOrFail()
-    assert.deepEqual(link.regionFilter, [])
+    assert.deepEqual(link.regionFilter, [{ state: 'CA' }])
+
+    // The event itself is untouched by the filter change — nothing about it
+    // is ever deleted.
+    assert.sameMembers(await entrantNames(), ['Alice', 'Bob'])
+
+    // Resolving again under the new filter is what actually drops Bob (no
+    // reported location) from this league's roster.
+    await new IdentityResolverService().run({ leagueId: league.id, eventId: second.eventId! })
+    assert.sameMembers(await leaguePlayerTags(league), ['Alice'])
   })
 
   test('re-importing under the exact same filter succeeds', async ({ assert }) => {
@@ -505,8 +549,10 @@ test.group('import pipeline', (group) => {
     alice.state = 'NY'
     await alice.save()
 
+    // Nothing is deleted by the relocation — it only changes what the next
+    // read counts.
     assert.lengthOf(await selection.forRanking(ranking), 0)
-    assert.lengthOf(await TournamentSet.all(), 1)
+    assert.lengthOf(await TournamentSet.all(), 2)
   })
 
   async function leaguePlayerTags(league: League) {
@@ -519,7 +565,7 @@ test.group('import pipeline', (group) => {
     return entrants.map((entrant) => entrant.name)
   }
 
-  test("re-importing under a new filter prunes the previous filter's league players", async ({
+  test('re-importing under a new filter updates which entrants are admitted, without touching the event itself', async ({
     assert,
   }) => {
     platforms.unregister('fake')
@@ -527,20 +573,23 @@ test.group('import pipeline', (group) => {
 
     const league = await seedLeague()
 
+    // No unlinking needed — a different filter on an already-counted event
+    // just updates `league_events.region_filter` in place.
     const first = await startImport(league, [{ city: 'Los Angeles' }])
     await new IdentityResolverService().run({ leagueId: league.id, eventId: first.eventId! })
     assert.sameMembers(await leaguePlayerTags(league), ['Alice'])
 
-    await LeagueEvent.query().where('leagueId', league.id).where('eventId', first.eventId!).delete()
-
     const second = await startImport(league, [{ city: 'San Francisco' }])
     await new IdentityResolverService().run({ leagueId: league.id, eventId: second.eventId! })
 
+    // Carol is admitted under the new filter, and Alice — no longer backed
+    // by any entrant it admits — is pruned from the roster...
     assert.sameMembers(await leaguePlayerTags(league), ['Carol'])
-    assert.sameMembers(await entrantNames(), ['Carol'])
+    // ...but the event itself never changed.
+    assert.sameMembers(await entrantNames(), ['Alice', 'Bob', 'Carol'])
   })
 
-  test('destroy tournament, import filtered, unlink, re-import filtered leaves only the new region', async ({
+  test("destroy tournament, import filtered, unlink, re-import filtered leaves only the new region's players", async ({
     assert,
   }) => {
     platforms.unregister('fake')
@@ -571,7 +620,9 @@ test.group('import pipeline', (group) => {
     await new IdentityResolverService().run({ leagueId: league.id, eventId: sf.eventId! })
 
     assert.sameMembers(await leaguePlayerTags(league), ['Carol'])
-    assert.sameMembers(await entrantNames(), ['Carol'])
+    // The tournament delete in step one wiped the event along with it, but
+    // re-importing it brought the whole thing back — not just Carol's slice.
+    assert.sameMembers(await entrantNames(), ['Alice', 'Bob', 'Carol'])
   })
 })
 

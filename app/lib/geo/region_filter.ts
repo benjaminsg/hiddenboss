@@ -91,18 +91,3 @@ export function entrantMatchesRegions(
     return matchesAnyRegion({ country, state, city: participant.city }, regions)
   })
 }
-
-function regionKey(region: LocationFilter): string {
-  return [region.country, region.state, region.city]
-    .map((value) => (value ? normalise(value) : ''))
-    .join('|')
-}
-
-export function regionsEqual(a: LocationFilter[], b: LocationFilter[]): boolean {
-  if (a.length !== b.length) return false
-
-  const sortedA = a.map(regionKey).sort()
-  const sortedB = b.map(regionKey).sort()
-
-  return sortedA.every((key, index) => key === sortedB[index])
-}

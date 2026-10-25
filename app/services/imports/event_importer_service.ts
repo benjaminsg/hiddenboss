@@ -12,12 +12,11 @@ import { PermanentPlatformError, PlatformError } from '#lib/platforms/errors'
 import { platforms } from '#lib/platforms/registry'
 import { createPlatformHttp } from '#lib/platforms/http'
 import { ValidatingSink } from '#lib/platforms/validating_sink'
-import { RegionFilteringSink } from '#lib/platforms/region_filtering_sink'
-import { regionsEqual } from '#lib/geo/region_filter'
-import { EventRegionReconcilerService } from '#services/imports/event_region_reconciler_service'
 import { DEFAULT_SIZE_LIMITS, SizeLimitingSink } from '#lib/platforms/size_limiting_sink'
 import { TournamentWriterService } from '#services/imports/tournament_writer_service'
+import { EntrantRegionService } from '#services/identity/entrant_region_service'
 import type { ImportSink, PlatformAdapter, PlatformFetch, EventRef } from '#lib/platforms/contracts'
+import type { LocationFilter } from '#lib/geo/region_filter'
 
 export interface ImportRequest {
   eventImportId: string
@@ -229,23 +228,6 @@ export class EventImporterService {
 
         eventImport.eventId = await writer.writeEvent(event)
         await eventImport.save()
-
-        /**
-         * A different region filter on an already imported tournament is rejected.
-         */
-        if (eventImport.regionFilter.length > 0) {
-          const existing = await LeagueEvent.query()
-            .where('leagueId', eventImport.leagueId)
-            .where('eventId', eventImport.eventId)
-            .first()
-
-          if (existing && !regionsEqual(existing.regionFilter, eventImport.regionFilter)) {
-            throw new PermanentPlatformError(
-              'This event is already counted by this league under a different (or no) region filter — remove it from Events first, then re-import with this filter.',
-              { platform: adapter.key }
-            )
-          }
-        }
       },
 
       entrants: async (eventExternalId, entrants) => {
@@ -287,27 +269,19 @@ export class EventImporterService {
       },
     }
 
-    /**
-     * A region filter drops non-qualifying sets so capability observation sits in front of it.
-     */
-    const filtered: ImportSink =
-      eventImport.regionFilter.length > 0
-        ? new RegionFilteringSink(eventImport.regionFilter, writing)
-        : writing
-
     const observing: ImportSink = {
-      tournament: (tournament) => filtered.tournament(tournament),
-      event: (event) => filtered.event(event),
+      tournament: (tournament) => writing.tournament(tournament),
+      event: (event) => writing.event(event),
       entrants: async (eventExternalId, entrants) => {
         observer.observeEntrants(entrants)
-        await filtered.entrants(eventExternalId, entrants)
+        await writing.entrants(eventExternalId, entrants)
       },
-      phase: (eventExternalId, phase) => filtered.phase(eventExternalId, phase),
+      phase: (eventExternalId, phase) => writing.phase(eventExternalId, phase),
       bracket: async (eventExternalId, phaseExternalId, bracket) => {
         observer.observeBracket(bracket)
-        await filtered.bracket(eventExternalId, phaseExternalId, bracket)
+        await writing.bracket(eventExternalId, phaseExternalId, bracket)
       },
-      progress: (completed, total, label) => filtered.progress(completed, total, label),
+      progress: (completed, total, label) => writing.progress(completed, total, label),
     }
 
     /**
@@ -362,29 +336,60 @@ export class EventImporterService {
         { addedByUserId: eventImport.createdByUserId, regionFilter: eventImport.regionFilter },
         { client: trx }
       )
-
-      if (eventImport.regionFilter.length > 0) {
-        await new EventRegionReconcilerService().reconcile(eventId, { client: trx })
-      }
     })
 
-    const filteredOutSets = filtered instanceof RegionFilteringSink ? filtered.excludedSetCount : 0
-    const filteredOutEntrants =
-      filtered instanceof RegionFilteringSink ? filtered.excludedEntrantCount : 0
+    /**
+     * The event is always written in full regardless of the region filter —
+     * this counts how much of it this league actually admits, not what got
+     * written. Identity resolution is what the filter actually gates: see
+     * `IdentityResolverService.accountsIn`.
+     */
+    const { entrantsImported, setsImported } = await this.importedCounts(
+      eventId,
+      eventImport.regionFilter,
+      counts
+    )
 
     eventImport.status = 'ok'
     eventImport.stage = 'done'
     eventImport.stats = {
       capabilities: observer.result,
       brackets: bracketsDone,
-      regionFilteredOutSets: filteredOutSets,
-      regionFilteredOutEntrants: filteredOutEntrants,
+      entrantsImported,
+      setsImported,
       ...counts,
     }
     eventImport.finishedAt = DateTime.now()
     await eventImport.save()
 
     return eventImport
+  }
+
+  private async importedCounts(
+    eventId: string,
+    regionFilter: LocationFilter[],
+    counts: { entrants: number; sets: number }
+  ): Promise<{ entrantsImported: number; setsImported: number }> {
+    if (regionFilter.length === 0) {
+      return { entrantsImported: counts.entrants, setsImported: counts.sets }
+    }
+
+    const qualifying = await new EntrantRegionService().qualifyingEntrantIds(eventId, regionFilter)
+
+    const setRows = await db
+      .from('sets as s')
+      .innerJoin('brackets as b', 'b.id', 's.bracket_id')
+      .innerJoin('phases as p', 'p.id', 'b.phase_id')
+      .where('p.event_id', eventId)
+      .select('s.entrant_a_id', 's.entrant_b_id')
+
+    const setsImported = setRows.filter(
+      (row) =>
+        (row.entrant_a_id === null || qualifying.has(row.entrant_a_id)) &&
+        (row.entrant_b_id === null || qualifying.has(row.entrant_b_id))
+    ).length
+
+    return { entrantsImported: qualifying.size, setsImported }
   }
 
   /**
