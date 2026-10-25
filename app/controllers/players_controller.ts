@@ -1,11 +1,11 @@
 import db from '@adonisjs/lucid/services/db'
 import LeaguePlayer from '#models/league_player'
-import Ranking from '#models/ranking'
 import RankingEligibilityOverride from '#models/ranking_eligibility_override'
 import PlayerEventAttendance from '#models/player_event_attendance'
 import LeaguePolicy from '#policies/league_policy'
 import RecomputeRankingJob from '#jobs/recompute_ranking_job'
 import { StalenessService } from '#services/rankings/staleness_service'
+import { DefaultRankingService } from '#services/rankings/default_ranking_service'
 import { updatePlayerValidator } from '#validators/player'
 import { addPlayerEventAttendanceValidator } from '#validators/player_event_attendance'
 import { DEFAULT_TIMEZONE } from '#lib/geo/timezones'
@@ -22,7 +22,7 @@ import type { HttpContext } from '@adonisjs/core/http'
  */
 export default class PlayersController {
   async index({ league, bouncer, request, inertia }: HttpContext) {
-    const ranking = await resolveRanking(league.id, request.input('ranking'))
+    const ranking = await new DefaultRankingService().resolve(league.id, request.input('ranking'))
 
     /**
      * Merged players are kept as tombstones so a merge stays reversible, but
@@ -97,7 +97,7 @@ export default class PlayersController {
       })
     }
 
-    const ranking = await resolveRanking(league.id, request.input('ranking'))
+    const ranking = await new DefaultRankingService().resolve(league.id, request.input('ranking'))
 
     const standing = ranking?.latestRecomputeId
       ? await db
@@ -429,23 +429,6 @@ export default class PlayersController {
       await RecomputeRankingJob.dispatch({ rankingId, force: true })
     }
   }
-}
-
-/**
- * Resolve ranking a profile is read against.
- */
-async function resolveRanking(leagueId: string, slug: unknown): Promise<Ranking | null> {
-  if (typeof slug === 'string' && slug.length > 0) {
-    const named = await Ranking.query().where('leagueId', leagueId).where('slug', slug).first()
-    if (named) return named
-  }
-
-  return Ranking.query()
-    .where('leagueId', leagueId)
-    .whereNotNull('latestRecomputeId')
-    .orderBy('published', 'desc')
-    .orderBy('name')
-    .first()
 }
 
 type Opponent = { slug: string; displayTag: string }

@@ -2,6 +2,7 @@ import db from '@adonisjs/lucid/services/db'
 import Ranking from '#models/ranking'
 import LeaguePolicy from '#policies/league_policy'
 import { HeadToHeadService } from '#services/h2h/head_to_head_service'
+import { DefaultRankingService } from '#services/rankings/default_ranking_service'
 import { DEFAULT_DQ_POLICY, meetsActivityRequirements } from '#lib/rankings/activity_requirements'
 import type {
   ActivityRequirement,
@@ -13,7 +14,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 export default class HeadToHeadController {
   async index({ league, bouncer, request, inertia }: HttpContext) {
     const { players, matchups } = await new HeadToHeadService().forLeague(league.id)
-    const ranking = await resolveRanking(league.id, request.input('ranking'))
+    const ranking = await new DefaultRankingService().resolve(league.id, request.input('ranking'))
     const rankings = await Ranking.query().where('leagueId', league.id).orderBy('name')
 
     const standings = ranking?.latestRecomputeId
@@ -63,21 +64,4 @@ export default class HeadToHeadController {
       matchups,
     })
   }
-}
-
-/**
- * Get ranking to display
- */
-async function resolveRanking(leagueId: string, slug: unknown): Promise<Ranking | null> {
-  if (typeof slug === 'string' && slug.length > 0) {
-    const named = await Ranking.query().where('leagueId', leagueId).where('slug', slug).first()
-    if (named) return named
-  }
-
-  return Ranking.query()
-    .where('leagueId', leagueId)
-    .whereNotNull('latestRecomputeId')
-    .orderBy('published', 'desc')
-    .orderBy('name')
-    .first()
 }
